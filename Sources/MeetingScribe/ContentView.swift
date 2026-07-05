@@ -231,10 +231,12 @@ private struct RecorderHomeView: View {
 }
 
 private struct CollapsedSidebarRail: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.openWindow) private var openWindow
     @Binding var isOpen: Bool
 
     var body: some View {
-        VStack {
+        VStack(spacing: 10) {
             Button {
                 isOpen = true
             } label: {
@@ -243,6 +245,59 @@ private struct CollapsedSidebarRail: View {
             }
             .buttonStyle(.plain)
             .help("Abrir opções")
+
+            Divider()
+                .padding(.horizontal, 8)
+
+            Button {
+                openWindow(id: "history")
+            } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Histórico")
+
+            Button {
+                model.presentImportPanel()
+            } label: {
+                Image(systemName: "square.and.arrow.down")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Importar áudio")
+            .disabled(model.isBusy)
+
+            Button {
+                model.openOutputFolder()
+            } label: {
+                Image(systemName: "folder")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Abrir pasta")
+
+            Button {
+                model.chooseOutputFolder()
+            } label: {
+                Image(systemName: "gearshape")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Alterar pasta")
+            .disabled(model.isBusy)
+
+            if model.isRecordingSession {
+                Button {
+                    model.showRecordingPanel()
+                } label: {
+                    Image(systemName: "rectangle.on.rectangle")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("Mini painel")
+            }
+
             Spacer()
         }
         .padding(.vertical, 12)
