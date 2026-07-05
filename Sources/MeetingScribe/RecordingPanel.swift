@@ -142,7 +142,7 @@ struct RecordingPanelView: View {
     }
 }
 
-private struct LiveWaveformView: View {
+struct LiveWaveformView: View {
     let level: Float
     let isPaused: Bool
 
@@ -168,7 +168,7 @@ private struct LiveWaveformView: View {
     }
 }
 
-private struct SourceLevelView: View {
+struct SourceLevelView: View {
     let title: String
     let level: Float
 

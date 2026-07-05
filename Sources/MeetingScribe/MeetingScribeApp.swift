@@ -46,6 +46,7 @@ struct PontoGravaApp: App {
             MenuBarView()
                 .environmentObject(model)
         }
+        .menuBarExtraStyle(.window)
     }
 
     private var warningPresented: Binding<Bool> {
