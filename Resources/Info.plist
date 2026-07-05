@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>pt_BR</string>
+    <key>CFBundleDisplayName</key>
+    <string>PontoGrava</string>
+    <key>CFBundleExecutable</key>
+    <string>PontoGrava</string>
+    <key>CFBundleIdentifier</key>
+    <string>local.gabriel.pontograva</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>PontoGrava</string>
+    <key>CFBundleIconFile</key>
+    <string>PontoGrava</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.3.1</string>
+    <key>CFBundleVersion</key>
+    <string>4</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLName</key>
+            <string>local.gabriel.pontograva.meeting</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>pontograva</string>
+            </array>
+        </dict>
+    </array>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>O PontoGrava usa o microfone selecionado para gravar sua voz durante reuniões.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>O PontoGrava captura o áudio reproduzido pelo Mac durante reuniões.</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+</dict>
+</plist>

@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PontoGrava · Protótipo macOS</title>
+  <style>
+    :root {
+      --bg: #f5f4ed;
+      --surface: #faf9f5;
+      --surface-warm: #e8e6dc;
+      --fg: #141413;
+      --fg-2: #3d3d3a;
+      --muted: #5e5d59;
+      --meta: #87867f;
+      --border: #f0eee6;
+      --border-soft: #e8e6dc;
+      --accent: #c96442;
+      --accent-on: #faf9f5;
+      --accent-hover: color-mix(in oklab, var(--accent), black 8%);
+      --accent-active: color-mix(in oklab, var(--accent), black 14%);
+      --success: #17a34a;
+      --warn: #eab308;
+      --danger: #b53333;
+      --font-display: "Anthropic Serif", Georgia, "Times New Roman", serif;
+      --font-body: "Anthropic Sans", "Arial", system-ui, -apple-system, sans-serif;
+      --font-mono: "Anthropic Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
+      --text-xs: 10px;
+      --text-sm: 14px;
+      --text-base: 16px;
+      --text-lg: 20px;
+      --text-xl: 25px;
+      --text-2xl: 32px;
+      --text-3xl: 52px;
+      --text-4xl: 64px;
+      --leading-body: 1.6;
+      --leading-tight: 1.1;
+      --tracking-display: 0em;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --space-6: 24px;
+      --space-8: 32px;
+      --space-12: 48px;
+      --section-y-desktop: 96px;
+      --section-y-tablet: 64px;
+      --section-y-phone: 48px;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-pill: 9999px;
+      --elev-flat: none;
+      --elev-ring: 0 0 0 1px var(--border);
+      --elev-raised: rgba(0, 0, 0, 0.05) 0px 4px 24px;
+      --focus-ring: 0 0 0 3px rgba(56, 152, 236, 0.3);
+      --motion-fast: 150ms;
+      --motion-base: 200ms;
+      --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+      --container-max: 1200px;
+      --container-gutter-desktop: 24px;
+      --container-gutter-tablet: 16px;
+      --container-gutter-phone: 12px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      line-height: var(--leading-body);
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    h1, h2, h3 { margin: 0; font-family: var(--font-display); font-weight: 500; line-height: var(--leading-tight); letter-spacing: var(--tracking-display); text-wrap: balance; }
+    p { margin: 0; text-wrap: pretty; }
+
+    .page {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: var(--space-8);
+    }
+    .app-shell {
+      width: min(1280px, 100%);
+      min-height: 780px;
+      display: grid;
+      grid-template-columns: 272px minmax(0, 1fr);
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--border-soft);
+      border-radius: 28px;
+      box-shadow: var(--elev-raised);
+    }
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-5);
+      padding: var(--space-5);
+      background: color-mix(in oklab, var(--surface-warm), var(--surface) 42%);
+      border-right: 1px solid var(--border-soft);
+    }
+    .window-dots { display: flex; gap: 7px; }
+    .window-dots span {
+      width: 11px;
+      height: 11px;
+      border-radius: var(--radius-pill);
+      background: var(--border-soft);
+      box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--fg), transparent 88%);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-3);
+    }
+    .brand h1 { font-size: var(--text-xl); }
+    .brand p { color: var(--muted); font-size: var(--text-sm); line-height: 1.35; }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+      width: max-content;
+      padding: 6px 10px;
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-pill);
+      color: var(--fg-2);
+      background: var(--surface);
+      font-size: var(--text-sm);
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: var(--radius-pill);
+      background: var(--success);
+    }
+    .nav-list, .meeting-list {
+      display: grid;
+      gap: var(--space-2);
+    }
+    .nav-button, .meeting-button, .icon-button, .primary-button, .soft-button, .danger-button {
+      border: 0;
+      border-radius: var(--radius-md);
+      transition: background var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
+    }
+    .nav-button {
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: 0 var(--space-3);
+      color: var(--muted);
+      background: transparent;
+      text-align: left;
+    }
+    .nav-button.active, .nav-button:hover {
+      color: var(--fg);
+      background: var(--surface);
+      box-shadow: var(--elev-ring);
+    }
+    .nav-icon {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      color: var(--fg-2);
+    }
+    .sidebar-section-title {
+      margin: 0 0 var(--space-2);
+      color: var(--meta);
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .meeting-button {
+      width: 100%;
+      display: grid;
+      gap: 3px;
+      padding: var(--space-3);
+      background: transparent;
+      color: var(--fg);
+      text-align: left;
+    }
+    .meeting-button:hover, .meeting-button.selected {
+      background: var(--surface);
+      box-shadow: var(--elev-ring);
+    }
+    .meeting-button strong { font-weight: 600; line-height: 1.25; }
+    .meeting-button span { color: var(--muted); font-size: var(--text-sm); line-height: 1.3; }
+    .sidebar-foot {
+      margin-top: auto;
+      display: grid;
+      gap: var(--space-3);
+      padding: var(--space-4);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-lg);
+      background: color-mix(in oklab, var(--surface), transparent 8%);
+    }
+    .main {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      min-width: 0;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      padding: var(--space-5) var(--space-6);
+      border-bottom: 1px solid var(--border);
+    }
+    .toolbar-title h2 { font-size: var(--text-2xl); }
+    .toolbar-title p { color: var(--muted); font-size: var(--text-sm); }
+    .toolbar-actions, .button-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      flex-wrap: wrap;
+    }
+    .primary-button, .soft-button, .danger-button, .icon-button {
+      min-height: 40px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-2);
+      padding: 0 var(--space-4);
+      font-weight: 600;
+    }
+    .primary-button {
+      color: var(--accent-on);
+      background: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+    .primary-button:hover { background: var(--accent-hover); }
+    .primary-button.recording { background: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
+    .soft-button {
+      color: var(--fg-2);
+      background: var(--surface-warm);
+      box-shadow: 0 0 0 1px var(--border-soft);
+    }
+    .soft-button:hover, .icon-button:hover { background: color-mix(in oklab, var(--surface-warm), var(--surface) 25%); }
+    .danger-button {
+      color: var(--accent-on);
+      background: var(--danger);
+      box-shadow: 0 0 0 1px var(--danger);
+    }
+    .icon-button {
+      width: 40px;
+      padding: 0;
+      color: var(--fg-2);
+      background: var(--surface);
+      box-shadow: var(--elev-ring);
+    }
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(360px, .9fr) minmax(460px, 1.25fr);
+      gap: var(--space-5);
+      padding: var(--space-6);
+      min-height: 0;
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--elev-ring);
+    }
+    .recorder {
+      display: grid;
+      gap: var(--space-5);
+      align-content: start;
+      padding: var(--space-6);
+    }
+    .recorder-head {
+      display: flex;
+      justify-content: space-between;
+      gap: var(--space-4);
+      align-items: flex-start;
+    }
+    .recorder-head h3, .detail-title h3 { font-size: var(--text-xl); }
+    .recorder-head p, .detail-title p, .field-label, .small { color: var(--muted); font-size: var(--text-sm); }
+    .timer {
+      font-family: var(--font-mono);
+      font-size: var(--text-xl);
+      color: var(--fg-2);
+      font-variant-numeric: tabular-nums;
+    }
+    .waveform {
+      height: 152px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: var(--space-6);
+      border-radius: var(--radius-lg);
+      background: color-mix(in oklab, var(--surface-warm), var(--surface) 56%);
+      overflow: hidden;
+    }
+    .bar {
+      width: 9px;
+      min-height: 18px;
+      border-radius: var(--radius-pill);
+      background: var(--danger);
+      transform-origin: center;
+      opacity: .78;
+      transition: height var(--motion-base) var(--ease-standard), opacity var(--motion-base) var(--ease-standard);
+    }
+    .idle .bar { opacity: .26; background: var(--muted); }
+    .paused .bar { opacity: .48; background: var(--warn); }
+    .recorder.idle > .button-row { display: none; }
+    .level-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-3);
+    }
+    .level-card {
+      display: grid;
+      gap: var(--space-2);
+      padding: var(--space-4);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+    }
+    .meter {
+      height: 8px;
+      border-radius: var(--radius-pill);
+      overflow: hidden;
+      background: var(--surface-warm);
+    }
+    .meter span {
+      display: block;
+      width: var(--value);
+      height: 100%;
+      border-radius: inherit;
+      background: var(--danger);
+      transition: width var(--motion-base) var(--ease-standard);
+    }
+    .import-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      padding: var(--space-4);
+      border-radius: var(--radius-lg);
+      background: color-mix(in oklab, var(--fg), transparent 95%);
+    }
+    .detail {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      min-height: 0;
+    }
+    .detail-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: var(--space-4);
+      padding: var(--space-6);
+      border-bottom: 1px solid var(--border);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+      padding: 6px 10px;
+      border-radius: var(--radius-pill);
+      background: color-mix(in oklab, var(--success), transparent 88%);
+      color: var(--fg-2);
+      font-size: var(--text-sm);
+      white-space: nowrap;
+    }
+    .player {
+      display: grid;
+      grid-template-columns: auto 70px minmax(160px, 1fr) 58px auto auto;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-4) var(--space-6);
+      border-bottom: 1px solid var(--border);
+    }
+    .range {
+      appearance: none;
+      width: 100%;
+      height: 8px;
+      border-radius: var(--radius-pill);
+      background: var(--surface-warm);
+      accent-color: var(--accent);
+    }
+    .transcript-wrap {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      padding: var(--space-6);
+      gap: var(--space-3);
+    }
+    .transcript-tools {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-3);
+    }
+    .transcript {
+      width: 100%;
+      min-height: 360px;
+      resize: none;
+      padding: var(--space-5);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-lg);
+      background: color-mix(in oklab, var(--surface-warm), var(--surface) 68%);
+      color: var(--fg);
+      font-family: var(--font-mono);
+      font-size: 15px;
+      line-height: 1.65;
+      outline: none;
+    }
+    .transcript:focus, .field select:focus {
+      box-shadow: var(--focus-ring);
+      border-color: color-mix(in oklab, var(--fg), transparent 80%);
+    }
+    .field {
+      display: grid;
+      gap: var(--space-2);
+    }
+    .field select {
+      min-height: 40px;
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      color: var(--fg);
+      padding: 0 var(--space-3);
+      outline: none;
+    }
+    .kbd-row {
+      display: flex;
+      gap: var(--space-2);
+      flex-wrap: wrap;
+    }
+    kbd {
+      padding: 3px 7px;
+      border: 1px solid var(--border-soft);
+      border-radius: 7px;
+      background: var(--surface);
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: var(--space-8);
+      translate: -50% 16px;
+      opacity: 0;
+      padding: var(--space-3) var(--space-4);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-pill);
+      background: var(--fg);
+      color: var(--surface);
+      box-shadow: var(--elev-raised);
+      transition: opacity var(--motion-base) var(--ease-standard), translate var(--motion-base) var(--ease-standard);
+      pointer-events: none;
+    }
+    .toast.visible { opacity: 1; translate: -50% 0; }
+
+    @media (max-width: 1080px) {
+      .app-shell, .workspace { grid-template-columns: 1fr; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--border-soft); }
+      .workspace { padding: var(--space-4); }
+    }
+    @media (max-width: 720px) {
+      .page { padding: var(--space-3); }
+      .app-shell { min-height: auto; border-radius: var(--radius-lg); }
+      .toolbar, .detail-top, .player, .transcript-wrap, .recorder { padding: var(--space-4); }
+      .toolbar, .recorder-head, .detail-top, .import-card { flex-direction: column; align-items: stretch; }
+      .player { grid-template-columns: auto 1fr; }
+      .player .range { grid-column: 1 / -1; }
+      .level-grid { grid-template-columns: 1fr; }
+      .toolbar-title h2 { font-size: var(--text-xl); }
+    }
+  </style>
+</head>
+<body>
+  <main class="page" data-od-id="main">
+    <section class="app-shell" data-od-id="ponto-grava-app">
+      <aside class="sidebar" data-od-id="sidebar">
+        <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+
+        <div class="brand" data-od-id="brand">
+          <div>
+            <h1>PontoGrava</h1>
+            <p>Gravação local de reuniões com transcrição editável.</p>
+          </div>
+        </div>
+
+        <span class="status-pill" data-od-id="status-pill"><span class="dot"></span> Pronto para gravar</span>
+
+        <nav class="nav-list" aria-label="Navegação principal" data-od-id="primary-nav">
+          <button class="nav-button active" data-od-id="nav-record">
+            <span class="nav-icon">●</span>
+            Gravar
+          </button>
+          <button class="nav-button" data-od-id="nav-history">
+            <span class="nav-icon">◷</span>
+            Histórico
+          </button>
+          <button class="nav-button" data-od-id="nav-folder">
+            <span class="nav-icon">⌘</span>
+            Pasta local
+          </button>
+        </nav>
+
+        <div data-od-id="meeting-list">
+          <p class="sidebar-section-title">Reuniões recentes</p>
+          <div class="meeting-list">
+            <button class="meeting-button selected" data-meeting="sync" data-od-id="meeting-sync">
+              <strong>SYNC produto e agenda</strong>
+              <span>42:18 · Transcrição pronta</span>
+            </button>
+            <button class="meeting-button" data-meeting="review" data-od-id="meeting-review">
+              <strong>Revisão semanal</strong>
+              <span>28:04 · Editado hoje</span>
+            </button>
+            <button class="meeting-button" data-meeting="imported" data-od-id="meeting-imported">
+              <strong>Áudio importado</strong>
+              <span>09:56 · PT-BR</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sidebar-foot" data-od-id="settings-summary">
+          <div class="field">
+            <label class="field-label" for="language">Idioma da transcrição</label>
+            <select id="language">
+              <option>Português do Brasil</option>
+              <option>Inglês</option>
+              <option>Espanhol</option>
+            </select>
+          </div>
+          <p class="small">Destino: Reuniões PontoGrava</p>
+          <div class="kbd-row" aria-label="Atalhos">
+            <kbd>⌘ R</kbd><kbd>Espaço</kbd><kbd>⌘ E</kbd>
+          </div>
+        </div>
+      </aside>
+
+      <div class="main" data-od-id="workspace">
+        <header class="toolbar" data-od-id="toolbar">
+          <div class="toolbar-title">
+            <h2>Captura e transcrição</h2>
+            <p id="toolbar-subtitle">Sistema + Microfone do MacBook Pro</p>
+          </div>
+          <div class="toolbar-actions">
+            <button class="soft-button" id="importButton" data-od-id="import-button">Importar áudio</button>
+            <button class="primary-button" id="recordButton" data-od-id="record-button">Iniciar gravação</button>
+          </div>
+        </header>
+
+        <div class="workspace">
+          <section class="panel recorder idle" id="recorderPanel" data-od-id="recorder-panel">
+            <div class="recorder-head">
+              <div>
+                <h3 id="recorderTitle">Pronto para começar</h3>
+                <p id="recorderCopy">Escolha o microfone, grave a reunião e deixe a transcrição local aparecer no histórico.</p>
+              </div>
+              <div class="timer" id="timer" data-od-id="recording-timer">00:00</div>
+            </div>
+
+            <div class="waveform" aria-label="Nível de áudio" data-od-id="waveform">
+              <span class="bar" style="height: 32%"></span>
+              <span class="bar" style="height: 58%"></span>
+              <span class="bar" style="height: 44%"></span>
+              <span class="bar" style="height: 76%"></span>
+              <span class="bar" style="height: 52%"></span>
+              <span class="bar" style="height: 90%"></span>
+              <span class="bar" style="height: 64%"></span>
+              <span class="bar" style="height: 38%"></span>
+              <span class="bar" style="height: 82%"></span>
+              <span class="bar" style="height: 48%"></span>
+              <span class="bar" style="height: 70%"></span>
+              <span class="bar" style="height: 42%"></span>
+            </div>
+
+            <div class="level-grid" data-od-id="source-levels">
+              <div class="level-card">
+                <span class="field-label">Sistema</span>
+                <div class="meter"><span id="systemLevel" style="--value: 18%"></span></div>
+              </div>
+              <div class="level-card">
+                <span class="field-label">Microfone</span>
+                <div class="meter"><span id="micLevel" style="--value: 24%"></span></div>
+              </div>
+            </div>
+
+            <div class="button-row" data-od-id="recording-controls">
+              <button class="soft-button" id="pauseButton">Pausar</button>
+              <button class="danger-button" id="stopButton">Parar e transcrever</button>
+            </div>
+
+            <div class="import-card" data-od-id="import-card">
+              <div>
+                <strong>Tem um WAV pronto?</strong>
+                <p class="small">Converta para o padrão do app e gere a transcrição no mesmo fluxo.</p>
+              </div>
+              <button class="soft-button" id="importInlineButton">Selecionar arquivo</button>
+            </div>
+          </section>
+
+          <section class="panel detail" data-od-id="meeting-detail">
+            <div class="detail-top">
+              <div class="detail-title">
+                <h3 id="meetingTitle">SYNC produto e agenda</h3>
+                <p id="meetingMeta">Entrada: Microfone do MacBook Pro · criado hoje às 16:00</p>
+              </div>
+              <span class="badge" id="meetingStatus" data-od-id="meeting-status"><span class="dot"></span> Transcrição pronta</span>
+            </div>
+
+            <div class="player" data-od-id="audio-player">
+              <button class="icon-button" id="playButton" aria-label="Reproduzir">▶</button>
+              <span class="small" id="currentTime">00:00</span>
+              <input class="range" id="seekRange" type="range" min="0" max="2538" value="420" aria-label="Posição do áudio" />
+              <span class="small">42:18</span>
+              <select aria-label="Velocidade" class="field-select" id="speedSelect">
+                <option>1x</option>
+                <option selected>1,25x</option>
+                <option>1,5x</option>
+              </select>
+              <button class="soft-button" id="finderButton">Mostrar no Finder</button>
+            </div>
+
+            <div class="transcript-wrap" data-od-id="transcript-editor">
+              <div class="transcript-tools">
+                <p class="small" id="saveState">Salvo automaticamente em transcricao.txt</p>
+                <div class="button-row">
+                  <button class="soft-button" id="copyButton">Copiar texto</button>
+                  <button class="soft-button" id="retranscribeButton">Refazer transcrição</button>
+                </div>
+              </div>
+              <textarea class="transcript" id="transcriptText" aria-label="Transcrição editável">Gabriel: Vamos revisar os pontos da sync e fechar a agenda da semana.
+
+Equipe: O fluxo de gravação ficou estável. O próximo ajuste é deixar áudio e transcrição juntos, sem trocar de aba.
+
+Gabriel: Perfeito. O usuário precisa reproduzir o WAV, corrigir erros do Whisper e salvar direto no arquivo da reunião.
+
+Equipe: Também vamos manter importação de áudio, notificações e acesso rápido ao Finder no mesmo contexto.</textarea>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">Ação concluída</div>
+
+  <script>
+    const meetings = {
+      sync: {
+        title: "SYNC produto e agenda",
+        meta: "Entrada: Microfone do MacBook Pro · criado hoje às 16:00",
+        status: "Transcrição pronta",
+        duration: "42:18",
+        text: `Gabriel: Vamos revisar os pontos da sync e fechar a agenda da semana.
+
+Equipe: O fluxo de gravação ficou estável. O próximo ajuste é deixar áudio e transcrição juntos, sem trocar de aba.
+
+Gabriel: Perfeito. O usuário precisa reproduzir o WAV, corrigir erros do Whisper e salvar direto no arquivo da reunião.
+
+Equipe: Também vamos manter importação de áudio, notificações e acesso rápido ao Finder no mesmo contexto.`
+      },
+      review: {
+        title: "Revisão semanal",
+        meta: "Entrada: Studio Display · editado hoje às 09:12",
+        status: "Editado hoje",
+        duration: "28:04",
+        text: `Resumo: revisar prioridades, registrar decisões e separar pendências.
+
+Decisão: manter a transcrição como arquivo local editável para facilitar correções rápidas depois da reunião.
+
+Próximo passo: validar o pacote .app e abrir direto pelo Finder.`
+      },
+      imported: {
+        title: "Áudio importado",
+        meta: "Entrada: arquivo WAV · importado ontem às 18:40",
+        status: "PT-BR",
+        duration: "09:56",
+        text: `Arquivo importado convertido para WAV padrão.
+
+A transcrição local foi criada e pode ser corrigida antes do envio do relatório.`
+      }
+    };
+
+    const state = { recording: false, paused: false, seconds: 0, timerId: null, playing: false };
+    const recorderPanel = document.querySelector("#recorderPanel");
+    const recordButton = document.querySelector("#recordButton");
+    const pauseButton = document.querySelector("#pauseButton");
+    const stopButton = document.querySelector("#stopButton");
+    const timer = document.querySelector("#timer");
+    const recorderTitle = document.querySelector("#recorderTitle");
+    const recorderCopy = document.querySelector("#recorderCopy");
+    const toolbarSubtitle = document.querySelector("#toolbar-subtitle");
+    const toast = document.querySelector("#toast");
+
+    function formatTime(total) {
+      const minutes = String(Math.floor(total / 60)).padStart(2, "0");
+      const seconds = String(total % 60).padStart(2, "0");
+      return `${minutes}:${seconds}`;
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add("visible");
+      window.clearTimeout(showToast.timeout);
+      showToast.timeout = window.setTimeout(() => toast.classList.remove("visible"), 1800);
+    }
+
+    function syncRecordingUI() {
+      recorderPanel.classList.toggle("idle", !state.recording);
+      recorderPanel.classList.toggle("paused", state.recording && state.paused);
+      recordButton.classList.toggle("recording", state.recording);
+      recordButton.textContent = state.recording ? "Gravando agora" : "Iniciar gravação";
+      pauseButton.textContent = state.paused ? "Continuar" : "Pausar";
+      recorderTitle.textContent = state.recording ? (state.paused ? "Gravação pausada" : "Gravando reunião") : "Pronto para começar";
+      recorderCopy.textContent = state.recording ? "Capturando sistema e microfone em duas trilhas para combinar no WAV final." : "Escolha o microfone, grave a reunião e deixe a transcrição local aparecer no histórico.";
+      toolbarSubtitle.textContent = state.recording ? "Sistema + Microfone · captura ativa" : "Sistema + Microfone do MacBook Pro";
+    }
+
+    function startTimer() {
+      window.clearInterval(state.timerId);
+      state.timerId = window.setInterval(() => {
+        if (!state.paused) state.seconds += 1;
+        timer.textContent = formatTime(state.seconds);
+        document.querySelector("#systemLevel").style.setProperty("--value", `${34 + Math.round(Math.random() * 45)}%`);
+        document.querySelector("#micLevel").style.setProperty("--value", `${28 + Math.round(Math.random() * 52)}%`);
+        document.querySelectorAll(".bar").forEach((bar) => {
+          bar.style.height = `${24 + Math.round(Math.random() * 68)}%`;
+        });
+      }, 1000);
+    }
+
+    recordButton.addEventListener("click", () => {
+      if (state.recording) return;
+      state.recording = true;
+      state.paused = false;
+      state.seconds = 0;
+      timer.textContent = "00:00";
+      syncRecordingUI();
+      startTimer();
+      showToast("Gravação iniciada");
+    });
+
+    pauseButton.addEventListener("click", () => {
+      if (!state.recording) return;
+      state.paused = !state.paused;
+      syncRecordingUI();
+      showToast(state.paused ? "Gravação pausada" : "Gravação retomada");
+    });
+
+    stopButton.addEventListener("click", () => {
+      if (!state.recording) return;
+      state.recording = false;
+      state.paused = false;
+      window.clearInterval(state.timerId);
+      syncRecordingUI();
+      document.querySelector("#meetingStatus").textContent = "Transcrevendo";
+      showToast("Áudio preservado; transcrição em andamento");
+      window.setTimeout(() => {
+        document.querySelector("#meetingStatus").innerHTML = '<span class="dot"></span> Transcrição pronta';
+      }, 1400);
+    });
+
+    document.querySelectorAll(".meeting-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".meeting-button").forEach((item) => item.classList.remove("selected"));
+        button.classList.add("selected");
+        const meeting = meetings[button.dataset.meeting];
+        document.querySelector("#meetingTitle").textContent = meeting.title;
+        document.querySelector("#meetingMeta").textContent = meeting.meta;
+        document.querySelector("#meetingStatus").innerHTML = `<span class="dot"></span> ${meeting.status}`;
+        document.querySelector("#transcriptText").value = meeting.text;
+        document.querySelector(".player .small:last-of-type").textContent = meeting.duration;
+      });
+    });
+
+    document.querySelector("#playButton").addEventListener("click", (event) => {
+      state.playing = !state.playing;
+      event.currentTarget.textContent = state.playing ? "Ⅱ" : "▶";
+      showToast(state.playing ? "Reprodução iniciada" : "Reprodução pausada");
+    });
+
+    document.querySelector("#seekRange").addEventListener("input", (event) => {
+      document.querySelector("#currentTime").textContent = formatTime(Number(event.target.value));
+    });
+
+    document.querySelector("#transcriptText").addEventListener("input", () => {
+      document.querySelector("#saveState").textContent = "Salvando alterações...";
+      window.clearTimeout(window.saveTimer);
+      window.saveTimer = window.setTimeout(() => {
+        document.querySelector("#saveState").textContent = "Salvo automaticamente em transcricao.txt";
+      }, 600);
+    });
+
+    document.querySelector("#copyButton").addEventListener("click", async () => {
+      await navigator.clipboard?.writeText(document.querySelector("#transcriptText").value);
+      showToast("Transcrição copiada");
+    });
+
+    ["importButton", "importInlineButton", "finderButton", "retranscribeButton"].forEach((id) => {
+      document.querySelector(`#${id}`).addEventListener("click", () => showToast("Fluxo acionado"));
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.metaKey && event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        recordButton.click();
+      }
+      if (event.code === "Space" && state.recording) {
+        event.preventDefault();
+        pauseButton.click();
+      }
+    });
+  </script>
+</body>
+</html>
