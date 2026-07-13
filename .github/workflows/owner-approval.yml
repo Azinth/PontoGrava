@@ -1,0 +1,33 @@
+name: Owner approval
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  owner-approval:
+    name: Owner approval
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require owner approval for external pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          if [[ "$PR_AUTHOR" == "$REPOSITORY_OWNER" ]]; then
+            echo "Pull request created by repository owner."
+            exit 0
+          fi
+
+          gh api "repos/$REPOSITORY/pulls/$PR_NUMBER/reviews" \
+            --jq "[.[] | select(.user.login == \"$REPOSITORY_OWNER\" and .commit_id == \"$PR_HEAD_SHA\" and .state != \"COMMENTED\")] | sort_by(.submitted_at) | last | .state == \"APPROVED\"" \
+            | grep -qx true

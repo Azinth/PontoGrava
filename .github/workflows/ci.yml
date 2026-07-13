@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: DiscordBot/package-lock.json
+      - name: Install FFmpeg
+        run: command -v ffmpeg >/dev/null || brew install ffmpeg
+      - name: Test Discord helper
+        run: npm ci --prefix DiscordBot && npm test --prefix DiscordBot
+      - name: Run Swift checks
+        run: ./scripts/test.sh
+      - name: Build app
+        run: swift build
