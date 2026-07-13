@@ -14,17 +14,21 @@ enum SmokeChecks {
             ],
             createdAt: Date(timeIntervalSince1970: 0),
             audioFilename: "audio.wav",
+            source: .local,
             detectedLanguage: "pt"
         )
         check(text.contains("Arquivo: audio.wav"), "audio filename")
+        check(text.contains("Fonte: Local"), "local source")
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         let named = TranscriptFormatter.format(
             segments: [TranscriptSegment(start: 4, text: "Olá", speaker: "Ana")],
             createdAt: date,
             audioFilename: "audio.wav",
+            source: .discord,
             detectedLanguage: "pt"
         )
         check(named.contains("[00:00:04] Ana: Olá"), "speaker name")
+        check(named.contains("Fonte: Discord"), "Discord source")
         check(text.contains("[00:00:00] Olá"), "trimmed first segment")
         check(text.contains("[00:01:02] segunda fala"), "second segment timestamp")
 

@@ -131,7 +131,7 @@ final class AppModel: ObservableObject {
 
     var discordInviteURL: URL? {
         guard let discordApplicationID else { return nil }
-        return URL(string: "https://discord.com/oauth2/authorize?client_id=\(discordApplicationID)&scope=bot&permissions=1051648")
+        return URL(string: "https://discord.com/oauth2/authorize?client_id=\(discordApplicationID)&scope=bot%20applications.commands&permissions=1051648")
     }
 
     func initialize() async {

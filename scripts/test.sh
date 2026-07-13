@@ -26,6 +26,17 @@ export DEVELOPER_DIR="/Library/Developer/CommandLineTools"
 /usr/bin/xcrun swiftc \
   -parse-as-library \
   "$ROOT/Sources/MeetingScribe/Models.swift" \
+  "$ROOT/Sources/MeetingScribe/TranscriptFormatting.swift" \
+  "$ROOT/Sources/MeetingScribe/SpeakerAttribution.swift" \
+  "$ROOT/Tests/SpeakerAttributionCheck.swift" \
+  -framework AVFoundation \
+  -o "$ROOT/work/tests/SpeakerAttributionCheck"
+
+"$ROOT/work/tests/SpeakerAttributionCheck"
+
+/usr/bin/xcrun swiftc \
+  -parse-as-library \
+  "$ROOT/Sources/MeetingScribe/Models.swift" \
   "$ROOT/Sources/MeetingScribe/AudioProcessing.swift" \
   "$ROOT/Sources/MeetingScribe/AudioImportService.swift" \
   "$ROOT/Tests/AudioMixerCheck.swift" \
