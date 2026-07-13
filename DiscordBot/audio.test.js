@@ -13,6 +13,7 @@ import {
   locateFFmpeg,
   normalizedPCMLevel,
   participantFilter,
+  recordingCommandError,
   safeName,
   writeJSONAtomic
 } from './audio.js';
@@ -65,6 +66,15 @@ test('aligns overlapping clips before mixing', () => {
   assert.match(filter, /\[1:a\]adelay=1250:all=1/);
   assert.match(filter, /amix=inputs=2/);
   assert.match(filter, /atrim=duration=10\.000/);
+});
+
+test('accepts stop only in the active channel and while not finalizing', () => {
+  const active = { session: { guildId: 'guild', channelId: 'channel' } };
+  assert.match(recordingCommandError(null, 'guild', 'channel'), /Não há/);
+  assert.match(recordingCommandError(active, 'guild', 'other'), /chat do canal/);
+  assert.equal(recordingCommandError(active, 'guild', 'channel'), null);
+  active.stopping = true;
+  assert.match(recordingCommandError(active, 'guild', 'channel'), /finalizada/);
 });
 
 test('loads the Opus decoder used for received voice packets', () => {

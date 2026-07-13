@@ -30,6 +30,7 @@ actor TranscriptionService {
             detectedLanguage: result.detectedLanguage,
             audioURL: audioURL,
             createdAt: createdAt,
+            source: .local,
             progress: progress
         )
     }
@@ -42,37 +43,25 @@ actor TranscriptionService {
         createdAt: Date,
         progress: @escaping @Sendable (Double, String) -> Void
     ) async throws -> URL {
-        var merged: [TranscriptSegment] = []
-        var detectedLanguage: String?
-        let count = max(1, manifest.participants.count)
-
-        for (index, participant) in manifest.participants.enumerated() {
-            let start = Double(index) / Double(count)
-            let share = 1 / Double(count)
-            let trackURL = folder.appendingPathComponent(participant.trackPath)
-            progress(start * 0.9, "Transcrevendo \(participant.displayName)…")
-            do {
-                let result = try await transcribeSegments(
-                    audioURL: trackURL,
-                    language: language
-                ) { value, _ in
-                    progress((start + value * share) * 0.9, "Transcrevendo \(participant.displayName)…")
-                }
-                detectedLanguage = detectedLanguage ?? result.detectedLanguage
-                merged.append(contentsOf: result.segments.map {
-                    TranscriptSegment(start: $0.start, text: $0.text, speaker: participant.displayName)
-                })
-            } catch AppError.transcriptionReturnedNoText {
-                continue
-            }
+        let result = try await transcribeSegments(
+            audioURL: audioURL,
+            language: language,
+            progress: progress
+        )
+        progress(0.9, "Identificando participantes…")
+        let tracks = manifest.participants.map {
+            SpeakerTrack(
+                displayName: $0.displayName,
+                url: folder.appendingPathComponent($0.trackPath)
+            )
         }
-
-        guard !merged.isEmpty else { throw AppError.transcriptionReturnedNoText }
+        let attributed = SpeakerAttribution.assign(result.segments, tracks: tracks)
         return try writeTranscript(
-            segments: merged.sorted { $0.start < $1.start },
-            detectedLanguage: detectedLanguage,
+            segments: attributed,
+            detectedLanguage: result.detectedLanguage,
             audioURL: audioURL,
             createdAt: createdAt,
+            source: .discord,
             progress: progress
         )
     }
@@ -133,7 +122,7 @@ actor TranscriptionService {
         }
 
         let segments = deduplicated(timedSegments)
-            .map { TranscriptSegment(start: $0.start, text: $0.text) }
+            .map { TranscriptSegment(start: $0.start, end: $0.end, text: $0.text) }
         guard !segments.isEmpty else { throw AppError.transcriptionReturnedNoText }
 
         return (segments, results.first?.language)
@@ -144,6 +133,7 @@ actor TranscriptionService {
         detectedLanguage: String?,
         audioURL: URL,
         createdAt: Date,
+        source: TranscriptSource,
         progress: @escaping @Sendable (Double, String) -> Void
     ) throws -> URL {
         progress(0.92, "Salvando a transcrição…")
@@ -151,6 +141,7 @@ actor TranscriptionService {
             segments: segments,
             createdAt: createdAt,
             audioFilename: audioURL.lastPathComponent,
+            source: source,
             detectedLanguage: detectedLanguage
         )
         let transcriptURL = audioURL.deletingLastPathComponent()
