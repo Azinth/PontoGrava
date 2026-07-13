@@ -20,6 +20,7 @@ import {
   finalizeSession,
   locateFFmpeg,
   readSession,
+  recordingCommandError,
   safeName,
   writeJSONAtomic
 } from './audio.js';
@@ -31,6 +32,11 @@ const ffmpegPath = locateFFmpeg();
 let recording = null;
 let emptyTimer = null;
 let isShuttingDown = false;
+const recordingCommands = [
+  { name: 'stop', description: 'Encerra e finaliza a gravação ativa do PontoGrava.' }
+];
+const recordingCommandNames = new Set(recordingCommands.map(command => command.name));
+const removedRecordingCommandNames = new Set(['pause', 'resume']);
 
 function emit(value) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -48,10 +54,26 @@ function event(name, result = {}) {
   emit({ type: 'event', event: name, result });
 }
 
+async function ensureGuildCommands(guild) {
+  const existing = await guild.commands.fetch();
+  await Promise.all(
+    existing
+      .filter(command => removedRecordingCommandNames.has(command.name))
+      .map(command => command.delete())
+  );
+  for (const command of recordingCommands) {
+    const registered = existing.find(item => item.name === command.name);
+    if (registered) await registered.edit(command);
+    else await guild.commands.create(command);
+  }
+}
+
 async function connect(token) {
-  if (client.isReady()) return { applicationId: client.user.id, username: client.user.username };
-  await client.login(token);
-  if (!client.isReady()) await new Promise(resolve => client.once('ready', resolve));
+  if (!client.isReady()) {
+    await client.login(token);
+    if (!client.isReady()) await new Promise(resolve => client.once('ready', resolve));
+  }
+  await Promise.all([...client.guilds.cache.values()].map(ensureGuildCommands));
   return { applicationId: client.user.id, username: client.user.username };
 }
 
@@ -213,7 +235,7 @@ async function startRecording(command) {
   return { ...session, folderPath: command.folderPath };
 }
 
-async function stopRecording(reason = 'manual') {
+async function stopRecording(reason = 'manual', announce = true) {
   const current = recording;
   if (!current) throw new Error('Não há gravação do Discord em andamento.');
   recording = null;
@@ -227,7 +249,7 @@ async function stopRecording(reason = 'manual') {
   current.session.durationSeconds = Math.max(0.1, (Date.now() - Date.parse(current.session.startedAt)) / 1000);
   writeJSONAtomic(current.sessionPath, current.session);
   const result = await finalizeSession(current.folderPath, ffmpegPath);
-  if (typeof current.channel.send === 'function') {
+  if (announce && typeof current.channel.send === 'function') {
     try {
       await current.channel.send(`⏹️ O PontoGrava encerrou a gravação (${reason}).`);
     } catch (error) {
@@ -237,11 +259,56 @@ async function stopRecording(reason = 'manual') {
   return result;
 }
 
+function memberName(interaction) {
+  return interaction.member?.displayName ?? interaction.user.globalName ?? interaction.user.username;
+}
+
+async function rejectInteraction(interaction, message) {
+  await interaction.reply({ content: message, ephemeral: true });
+}
+
+async function handleInteraction(interaction) {
+  if (!interaction.isChatInputCommand() || !recordingCommandNames.has(interaction.commandName)) return;
+  const validationError = recordingCommandError(
+    recording,
+    interaction.guildId,
+    interaction.channelId
+  );
+  if (validationError) {
+    await rejectInteraction(interaction, validationError);
+    return;
+  }
+
+  const displayName = memberName(interaction);
+  const current = recording;
+  current.stopping = true;
+  try {
+    await interaction.reply(`⏹️ ${displayName} encerrou a gravação. Finalizando…`);
+  } catch (error) {
+    if (recording === current) current.stopping = false;
+    throw error;
+  }
+  try {
+    const result = await stopRecording('comando /stop', false);
+    event('recordingStopped', result);
+    await interaction.editReply(`⏹️ ${displayName} encerrou a gravação.`);
+  } catch (error) {
+    event('recordingFailed', { message: error.message });
+    await interaction.editReply('⚠️ Não foi possível finalizar a gravação. Verifique o PontoGrava no Mac.');
+  }
+}
+
 client.on('voiceStateUpdate', (oldState, newState) => {
   if (!recording) return;
   if (oldState.channelId === recording.channel.id || newState.channelId === recording.channel.id) {
     scheduleEmptyStop();
   }
+});
+client.on('interactionCreate', interaction => {
+  handleInteraction(interaction).catch(error => process.stderr.write(`Discord command: ${error.message}\n`));
+});
+client.on('guildCreate', guild => {
+  ensureGuildCommands(guild).catch(error => process.stderr.write(`Discord commands: ${error.message}\n`));
 });
 
 async function handle(command) {

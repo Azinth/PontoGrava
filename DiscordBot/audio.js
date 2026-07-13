@@ -80,6 +80,15 @@ export function readSession(folderPath) {
   return JSON.parse(readFileSync(join(folderPath, '.discord', 'session.json'), 'utf8'));
 }
 
+export function recordingCommandError(recording, guildId, channelId) {
+  if (!recording) return 'Não há uma gravação do Discord em andamento.';
+  if (guildId !== recording.session.guildId || channelId !== recording.session.channelId) {
+    return 'Use este comando no chat do canal de voz que está sendo gravado.';
+  }
+  if (recording.stopping) return 'A gravação já está sendo finalizada.';
+  return null;
+}
+
 function run(executable, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, { stdio: ['ignore', 'ignore', 'pipe'] });

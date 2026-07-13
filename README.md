@@ -80,13 +80,20 @@ O PontoGrava procura os executáveis em `/opt/homebrew/bin` e `/usr/local/bin`.
 1. Crie uma aplicação no [Discord Developer Portal](https://discord.com/developers/applications).
 2. Abra a seção **Bot**, crie o bot e copie o **Token**. A **Public Key** não funciona como token.
 3. No PontoGrava, selecione **Discord**, cole o token e clique em **Salvar e conectar**.
-4. Use o link de convite exibido pelo app para adicionar o bot ao servidor.
-5. Autorize as permissões **Ver canais**, **Conectar** e **Enviar mensagens**.
+4. Use o link de convite exibido pelo app para adicionar o bot ao servidor e autorizar o comando `/stop`.
+5. Autorize as permissões **Ver canais**, **Conectar** e **Enviar mensagens**. Os membros também precisam poder **Usar comandos de aplicativos** no canal.
 6. Escolha o servidor e o canal de voz e clique em **Gravar canal do Discord**.
 
 A gravação termina pelo botão do app, ao perder a conexão ou depois que o bot
 fica sozinho por 60 segundos. Se o app for interrompido, ele oferece a
 recuperação dos trechos locais na próxima abertura.
+
+Durante a gravação, qualquer membro com acesso ao chat do canal de voz pode usar
+`/stop`. Comandos enviados em outros canais são recusados de forma privada.
+
+O Whisper transcreve o `audio.wav` combinado uma única vez. As faixas individuais
+alinhadas são usadas somente para associar cada trecho ao participante registrado
+no manifesto do Discord.
 
 ## Arquivos e privacidade
 

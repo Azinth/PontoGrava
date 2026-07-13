@@ -1,12 +1,19 @@
 import Foundation
 
+enum TranscriptSource: String {
+    case local = "Local"
+    case discord = "Discord"
+}
+
 struct TranscriptSegment: Equatable {
     let start: TimeInterval
+    let end: TimeInterval
     let text: String
     let speaker: String?
 
-    init(start: TimeInterval, text: String, speaker: String? = nil) {
+    init(start: TimeInterval, end: TimeInterval? = nil, text: String, speaker: String? = nil) {
         self.start = start
+        self.end = max(start, end ?? start)
         self.text = text
         self.speaker = speaker
     }
@@ -17,12 +24,14 @@ enum TranscriptFormatter {
         segments: [TranscriptSegment],
         createdAt: Date,
         audioFilename: String,
+        source: TranscriptSource,
         detectedLanguage: String?
     ) -> String {
         var lines = [
             "TRANSCRIÇÃO LOCAL",
             "Data: \(MeetingNaming.titleFormatter.string(from: createdAt))",
             "Arquivo: \(audioFilename)",
+            "Fonte: \(source.rawValue)",
             "Idioma: \(detectedLanguage ?? "automático")",
             String(repeating: "-", count: 48),
             ""
