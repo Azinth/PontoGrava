@@ -3,6 +3,13 @@ import Foundation
 struct TranscriptSegment: Equatable {
     let start: TimeInterval
     let text: String
+    let speaker: String?
+
+    init(start: TimeInterval, text: String, speaker: String? = nil) {
+        self.start = start
+        self.text = text
+        self.speaker = speaker
+    }
 }
 
 enum TranscriptFormatter {
@@ -22,7 +29,8 @@ enum TranscriptFormatter {
         ]
 
         lines.append(contentsOf: segments.map { segment in
-            "[\(timestamp(segment.start))] \(segment.text.trimmingCharacters(in: .whitespacesAndNewlines))"
+            let speaker = segment.speaker.map { "\($0): " } ?? ""
+            return "[\(timestamp(segment.start))] \(speaker)\(segment.text.trimmingCharacters(in: .whitespacesAndNewlines))"
         })
         lines.append("")
         return lines.joined(separator: "\n")

@@ -16,6 +16,15 @@ export DEVELOPER_DIR="/Library/Developer/CommandLineTools"
 
 /usr/bin/xcrun swiftc \
   -parse-as-library \
+  "$ROOT/Sources/MeetingScribe/DiscordIntegration.swift" \
+  "$ROOT/Tests/DiscordIntegrationCheck.swift" \
+  -framework Security \
+  -o "$ROOT/work/tests/DiscordIntegrationCheck"
+
+"$ROOT/work/tests/DiscordIntegrationCheck"
+
+/usr/bin/xcrun swiftc \
+  -parse-as-library \
   "$ROOT/Sources/MeetingScribe/Models.swift" \
   "$ROOT/Sources/MeetingScribe/AudioProcessing.swift" \
   "$ROOT/Sources/MeetingScribe/AudioImportService.swift" \

@@ -12,6 +12,15 @@ final class AppModel: ObservableObject {
     let notificationService: NotificationService
 
     @Published var selectedMicrophoneID: String?
+    @Published var recordingMode: RecordingMode {
+        didSet { settings.recordingMode = recordingMode }
+    }
+    @Published var selectedDiscordGuildID: String? {
+        didSet { settings.discordGuildID = selectedDiscordGuildID }
+    }
+    @Published var selectedDiscordChannelID: String? {
+        didSet { settings.discordChannelID = selectedDiscordChannelID }
+    }
     @Published var selectedRecordID: UUID? {
         didSet { playbackController.load(selectedRecord) }
     }
@@ -27,13 +36,25 @@ final class AppModel: ObservableObject {
     @Published private(set) var recordingTimeline = RecordingTimeline()
     @Published private(set) var systemAudioLevel: Float = 0
     @Published private(set) var microphoneAudioLevel: Float = 0
+    @Published private(set) var discordAudioLevel: Float = 0
+    @Published var discordTokenDraft = ""
+    @Published private(set) var discordHasToken: Bool
+    @Published private(set) var discordConnected = false
+    @Published private(set) var discordConnectionDetail = "Configure o bot para listar os canais."
+    @Published private(set) var discordApplicationID: String?
+    @Published private(set) var discordGuilds: [DiscordGuild] = []
+    @Published private(set) var discordChannels: [DiscordChannel] = []
+    @Published private(set) var discordParticipants: [String] = []
+    @Published var discordRecoveryRequest: DiscordRecoveryRequest?
 
     private let recordingEngine = RecordingEngine()
     private let transcriptionService = TranscriptionService()
+    private let discordBotClient = DiscordBotClient()
     private let meetingFileService: MeetingFileService
     private var activeFolder: URL?
     private var activeCreatedAt: Date?
     private var activeMicrophoneName: String?
+    private var activeDiscordRecording = false
 
     init(
         settings: AppSettings? = nil,
@@ -45,11 +66,16 @@ final class AppModel: ObservableObject {
     ) {
         let settings = settings ?? AppSettings()
         self.settings = settings
+        recordingMode = settings.recordingMode
+        selectedDiscordGuildID = settings.discordGuildID
+        selectedDiscordChannelID = settings.discordChannelID
         self.meetingStore = meetingStore ?? MeetingStore()
         self.deviceManager = deviceManager ?? AudioDeviceManager()
         self.playbackController = playbackController ?? AudioPlaybackController()
         self.notificationService = notificationService ?? NotificationService()
         self.meetingFileService = meetingFileService ?? MeetingFileService()
+        discordHasToken = DiscordTokenStore.load() != nil
+        discordRecoveryRequest = nil
         showOnboarding = !settings.hasCompletedOnboarding
 
         recordingEngine.onWarning = { [weak self] message in
@@ -61,6 +87,9 @@ final class AppModel: ObservableObject {
                 self?.microphoneAudioLevel = microphone
             }
         }
+        discordBotClient.onEvent = { [weak self] event in
+            self?.handleDiscordEvent(event)
+        }
     }
 
     var records: [MeetingRecord] { meetingStore.records }
@@ -68,7 +97,19 @@ final class AppModel: ObservableObject {
     var isRecording: Bool { phase == .recording }
     var isPaused: Bool { phase == .paused }
     var isRecordingSession: Bool { isRecording || isPaused }
+    var isDiscordRecording: Bool { isRecordingSession && activeDiscordRecording }
+    var canPauseRecording: Bool { isRecordingSession && !activeDiscordRecording }
     var recordingStartedAt: Date? { recordingTimeline.startedAt }
+
+    var canBeginRecording: Bool {
+        guard phase == .idle else { return false }
+        if recordingMode == .discord {
+            return discordConnected
+                && selectedDiscordGuildID != nil
+                && selectedDiscordChannelID != nil
+        }
+        return selectedMicrophoneID != nil
+    }
 
     var selectedRecord: MeetingRecord? {
         guard let selectedRecordID else { return nil }
@@ -80,6 +121,19 @@ final class AppModel: ObservableObject {
         return deviceManager.name(for: selectedMicrophoneID) ?? "Microfone indisponível"
     }
 
+    var recordingSourceName: String {
+        if activeDiscordRecording {
+            let channel = discordChannels.first { $0.id == selectedDiscordChannelID }?.name ?? "Discord"
+            return "Discord · #\(channel)"
+        }
+        return selectedMicrophoneName
+    }
+
+    var discordInviteURL: URL? {
+        guard let discordApplicationID else { return nil }
+        return URL(string: "https://discord.com/oauth2/authorize?client_id=\(discordApplicationID)&scope=bot&permissions=1051648")
+    }
+
     func initialize() async {
         do {
             try settings.ensureOutputFolder()
@@ -87,6 +141,8 @@ final class AppModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
         refreshMicrophones()
+        detectDiscordRecoverySession()
+        if discordHasToken { await connectDiscord() }
         if selectedRecordID == nil { selectedRecordID = records.first?.id }
         await refreshNotificationPermission()
         showNotificationInvitation = settings.hasCompletedOnboarding
@@ -102,6 +158,14 @@ final class AppModel: ObservableObject {
     }
 
     func beginRecording() async {
+        if recordingMode == .discord {
+            await beginDiscordRecording()
+        } else {
+            await beginMacRecording()
+        }
+    }
+
+    private func beginMacRecording() async {
         guard phase == .idle else { return }
         playbackController.pause()
         phase = .preparing
@@ -140,7 +204,7 @@ final class AppModel: ObservableObject {
     }
 
     func pauseRecording() {
-        guard phase == .recording else { return }
+        guard phase == .recording, !activeDiscordRecording else { return }
         do {
             try recordingEngine.pause()
             recordingTimeline.pause(at: Date())
@@ -152,7 +216,7 @@ final class AppModel: ObservableObject {
     }
 
     func resumeRecording() {
-        guard phase == .paused else { return }
+        guard phase == .paused, !activeDiscordRecording else { return }
         do {
             try recordingEngine.resume()
             recordingTimeline.resume(at: Date())
@@ -164,6 +228,14 @@ final class AppModel: ObservableObject {
     }
 
     func stopRecording() async {
+        if activeDiscordRecording {
+            await stopDiscordRecording()
+        } else {
+            await stopMacRecording()
+        }
+    }
+
+    private func stopMacRecording() async {
         guard isRecordingSession,
               let folder = activeFolder,
               let createdAt = activeCreatedAt else { return }
@@ -366,7 +438,7 @@ final class AppModel: ObservableObject {
     }
 
     func showRecordingPanel() {
-        guard isRecordingSession else { return }
+        guard isRecordingSession, !activeDiscordRecording else { return }
         RecordingPanelController.shared.show(model: self)
     }
 
@@ -393,20 +465,140 @@ final class AppModel: ObservableObject {
         _ = deviceManager.requestScreenPermission()
     }
 
+    func saveDiscordTokenAndConnect() async {
+        let token = discordTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            errorMessage = "Cole o token do bot do Discord."
+            return
+        }
+        do {
+            try DiscordTokenStore.save(token)
+            discordTokenDraft = ""
+            discordHasToken = true
+            await connectDiscord()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func connectDiscord() async {
+        guard phase == .idle, let token = DiscordTokenStore.load() else { return }
+        discordConnectionDetail = "Conectando ao Discord…"
+        do {
+            let identity = try await discordBotClient.connect(token: token)
+            discordApplicationID = identity.applicationId
+            discordGuilds = try await discordBotClient.listGuilds()
+            discordConnected = true
+            discordConnectionDetail = "Conectado como \(identity.username)."
+            let selected = selectedDiscordGuildID.flatMap { id in
+                discordGuilds.first { $0.id == id }?.id
+            } ?? discordGuilds.first?.id
+            await selectDiscordGuild(selected)
+        } catch {
+            discordConnected = false
+            discordGuilds = []
+            discordChannels = []
+            discordConnectionDetail = error.localizedDescription
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func removeDiscordToken() {
+        guard !isRecordingSession else { return }
+        DiscordTokenStore.delete()
+        discordBotClient.terminate()
+        discordHasToken = false
+        discordConnected = false
+        discordApplicationID = nil
+        discordGuilds = []
+        discordChannels = []
+        discordAudioLevel = 0
+        selectedDiscordGuildID = nil
+        selectedDiscordChannelID = nil
+        discordConnectionDetail = "Configure o bot para listar os canais."
+    }
+
+    func selectDiscordGuild(_ id: String?) async {
+        selectedDiscordGuildID = id
+        selectedDiscordChannelID = nil
+        discordChannels = []
+        guard let id, discordConnected else { return }
+        do {
+            discordChannels = try await discordBotClient.listChannels(guildId: id)
+            selectedDiscordChannelID = discordChannels.first?.id
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func dismissDiscordRecovery() {
+        discordRecoveryRequest = nil
+    }
+
+    func recoverDiscordSession(_ request: DiscordRecoveryRequest) async {
+        discordRecoveryRequest = nil
+        let folder = request.folder
+        let manifestURL = folder.appendingPathComponent(".discord/manifest.json")
+        let audioURL = folder.appendingPathComponent("audio.wav")
+        phase = .finalizing
+        statusDetail = "Recuperando uma gravação do Discord…"
+        do {
+            let result: DiscordCaptureResult
+            if FileManager.default.fileExists(
+                atPath: folder.appendingPathComponent(".discord/session.json").path
+            ) {
+                result = try await discordBotClient.recover(folder: folder)
+            } else {
+                let manifest = try DiscordManifest.load(from: folder)
+                result = DiscordCaptureResult(
+                    guildId: manifest.guildId,
+                    guildName: manifest.guildName,
+                    channelId: manifest.channelId,
+                    channelName: manifest.channelName,
+                    startedAt: manifest.startedAt,
+                    durationSeconds: manifest.durationSeconds,
+                    participants: manifest.participants,
+                    folderPath: folder.path,
+                    audioPath: audioURL.path,
+                    manifestPath: manifestURL.path
+                )
+            }
+            await finishDiscordCapture(result)
+            detectDiscordRecoverySession()
+        } catch {
+            phase = .idle
+            warningMessage = "Não foi possível recuperar \(folder.lastPathComponent): \(error.localizedDescription)"
+        }
+    }
+
     private func transcribe(_ record: inout MeetingRecord) async {
         phase = .transcribing
         progress = 0.02
         statusDetail = "Preparando o Whisper local…"
         do {
-            let transcriptURL = try await transcriptionService.transcribe(
-                audioURL: record.audioURL,
-                language: settings.language,
-                createdAt: record.createdAt
-            ) { [weak self] value, detail in
+            let reportProgress: @Sendable (Double, String) -> Void = { [weak self] value, detail in
                 Task { @MainActor in
                     self?.progress = value
                     self?.statusDetail = detail
                 }
+            }
+            let transcriptURL: URL
+            if let manifest = try? DiscordManifest.load(from: record.folderURL) {
+                transcriptURL = try await transcriptionService.transcribeDiscord(
+                    manifest: manifest,
+                    folder: record.folderURL,
+                    audioURL: record.audioURL,
+                    language: settings.language,
+                    createdAt: record.createdAt,
+                    progress: reportProgress
+                )
+            } else {
+                transcriptURL = try await transcriptionService.transcribe(
+                    audioURL: record.audioURL,
+                    language: settings.language,
+                    createdAt: record.createdAt,
+                    progress: reportProgress
+                )
             }
             record.transcriptPath = transcriptURL.path
             record.status = .ready
@@ -438,13 +630,28 @@ final class AppModel: ObservableObject {
         return candidate
     }
 
+    private func uniqueDiscordFolder(for date: Date) -> URL {
+        let baseName = MeetingNaming.discordFolderName(for: date)
+        var candidate = settings.outputFolderURL.appendingPathComponent(baseName, isDirectory: true)
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = settings.outputFolderURL
+                .appendingPathComponent("\(baseName)_\(suffix)", isDirectory: true)
+            suffix += 1
+        }
+        return candidate
+    }
+
     private func clearActiveRecording() {
         activeFolder = nil
         activeCreatedAt = nil
         activeMicrophoneName = nil
+        activeDiscordRecording = false
+        discordParticipants = []
         recordingTimeline.reset()
         systemAudioLevel = 0
         microphoneAudioLevel = 0
+        discordAudioLevel = 0
     }
 
     private func removeFromHistory(_ record: MeetingRecord) {
@@ -468,5 +675,118 @@ final class AppModel: ObservableObject {
         progress = 0
         statusDetail = "Não foi possível concluir a operação."
         errorMessage = error.localizedDescription
+    }
+
+    private func beginDiscordRecording() async {
+        guard phase == .idle,
+              discordConnected,
+              let guildID = selectedDiscordGuildID,
+              let channelID = selectedDiscordChannelID else { return }
+        playbackController.pause()
+        phase = .preparing
+        progress = 0
+        discordAudioLevel = 0
+        statusDetail = "Conectando o bot ao canal…"
+        let createdAt = Date()
+        let folder = uniqueDiscordFolder(for: createdAt)
+        do {
+            try settings.ensureOutputFolder()
+            try await discordBotClient.start(guildId: guildID, channelId: channelID, folder: folder)
+            activeFolder = folder
+            activeCreatedAt = createdAt
+            activeDiscordRecording = true
+            discordParticipants = []
+            recordingTimeline.start(at: createdAt)
+            phase = .recording
+            statusDetail = "Gravando o canal do Discord."
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            discordAudioLevel = 0
+            fail(error)
+        }
+    }
+
+    private func stopDiscordRecording() async {
+        guard isRecordingSession, activeDiscordRecording else { return }
+        phase = .finalizing
+        statusDetail = "Finalizando e combinando as faixas do Discord…"
+        do {
+            let result = try await discordBotClient.stop()
+            await finishDiscordCapture(result)
+        } catch {
+            clearActiveRecording()
+            fail(error)
+        }
+    }
+
+    private func finishDiscordCapture(_ result: DiscordCaptureResult) async {
+        let createdAt = result.startedAt
+        var record = MeetingRecord(
+            id: UUID(),
+            createdAt: createdAt,
+            title: MeetingNaming.discordTitle(channelName: result.channelName, date: createdAt),
+            folderPath: result.folderPath,
+            audioPath: result.audioPath,
+            transcriptPath: nil,
+            duration: result.durationSeconds,
+            status: .transcribing,
+            errorMessage: nil,
+            microphoneName: "Discord · \(result.guildName) / #\(result.channelName)"
+        )
+        meetingStore.upsert(record)
+        selectedRecordID = record.id
+        clearActiveRecording()
+        await transcribe(&record)
+    }
+
+    private func handleDiscordEvent(_ event: DiscordBotEvent) {
+        switch event {
+        case let .participant(name):
+            if !discordParticipants.contains(name) {
+                discordParticipants.append(name)
+                discordParticipants.sort()
+            }
+        case let .audioLevel(level):
+            if activeDiscordRecording || phase == .preparing {
+                discordAudioLevel = max(0, min(1, level))
+            }
+        case let .stopped(result):
+            guard activeDiscordRecording else { return }
+            phase = .finalizing
+            statusDetail = "Finalizando a gravação automática do Discord…"
+            Task { await finishDiscordCapture(result) }
+        case let .failed(message):
+            guard activeDiscordRecording else { return }
+            clearActiveRecording()
+            fail(DiscordIntegrationError.helper(message))
+        case let .helperStopped(detail):
+            discordConnected = false
+            discordAudioLevel = 0
+            discordConnectionDetail = "O helper do Discord foi encerrado."
+            if activeDiscordRecording {
+                clearActiveRecording()
+                fail(detail.map(DiscordIntegrationError.helper) ?? DiscordIntegrationError.helperStopped)
+            }
+        }
+    }
+
+    private func detectDiscordRecoverySession() {
+        guard discordRecoveryRequest == nil else { return }
+        guard let folders = try? FileManager.default.contentsOfDirectory(
+            at: settings.outputFolderURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        discordRecoveryRequest = folders.first { folder in
+            let sessionURL = folder.appendingPathComponent(".discord/session.json")
+            let manifestURL = folder.appendingPathComponent(".discord/manifest.json")
+            let audioURL = folder.appendingPathComponent("audio.wav")
+            let alreadyIndexed = records.contains { $0.audioPath == audioURL.path }
+            guard !alreadyIndexed else { return false }
+            let hasSession = FileManager.default.fileExists(atPath: sessionURL.path)
+            let hasCompletedCapture = FileManager.default.fileExists(atPath: manifestURL.path)
+                && FileManager.default.fileExists(atPath: audioURL.path)
+            return hasSession || hasCompletedCapture
+        }.map(DiscordRecoveryRequest.init(folder:))
     }
 }

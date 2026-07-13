@@ -28,6 +28,18 @@ struct PontoGravaApp: App {
                 } message: {
                     Text(model.errorMessage ?? "")
                 }
+                .alert(
+                    "Recuperar gravação do Discord?",
+                    isPresented: recoveryPresented,
+                    presenting: model.discordRecoveryRequest
+                ) { request in
+                    Button("Agora não", role: .cancel) { model.dismissDiscordRecovery() }
+                    Button("Recuperar e transcrever") {
+                        Task { await model.recoverDiscordSession(request) }
+                    }
+                } message: { request in
+                    Text("Foram encontrados arquivos de \(request.folder.lastPathComponent) que ainda não estão no histórico.")
+                }
         }
         .defaultSize(width: 420, height: 210)
         .windowResizability(.contentSize)
@@ -60,6 +72,13 @@ struct PontoGravaApp: App {
         Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
+        )
+    }
+
+    private var recoveryPresented: Binding<Bool> {
+        Binding(
+            get: { model.discordRecoveryRequest != nil },
+            set: { if !$0 { model.dismissDiscordRecovery() } }
         )
     }
 }

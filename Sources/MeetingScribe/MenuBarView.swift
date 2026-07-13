@@ -5,7 +5,9 @@ struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
 
     private var combinedLevel: Float {
-        max(model.systemAudioLevel, model.microphoneAudioLevel)
+        model.isDiscordRecording
+            ? model.discordAudioLevel
+            : max(model.systemAudioLevel, model.microphoneAudioLevel)
     }
 
     var body: some View {
@@ -62,7 +64,7 @@ struct MenuBarView: View {
                 }
             }
 
-            Text(model.selectedMicrophoneName)
+            Text(model.recordingSourceName)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -70,9 +72,20 @@ struct MenuBarView: View {
             LiveWaveformView(level: combinedLevel, isPaused: model.isPaused)
                 .frame(height: 52)
 
-            VStack(spacing: 8) {
-                SourceLevelView(title: "Sistema", level: model.systemAudioLevel)
-                SourceLevelView(title: "Microfone", level: model.microphoneAudioLevel)
+            if model.isDiscordRecording {
+                Text(
+                    model.discordParticipants.isEmpty
+                        ? "Aguardando participantes…"
+                        : model.discordParticipants.joined(separator: ", ")
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            } else {
+                VStack(spacing: 8) {
+                    SourceLevelView(title: "Sistema", level: model.systemAudioLevel)
+                    SourceLevelView(title: "Microfone", level: model.microphoneAudioLevel)
+                }
             }
 
             HStack(spacing: 10) {
@@ -85,7 +98,7 @@ struct MenuBarView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.orange)
-                } else {
+                } else if model.canPauseRecording {
                     Button {
                         model.pauseRecording()
                     } label: {
@@ -111,7 +124,7 @@ struct MenuBarView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("PontoGrava")
                 .font(.headline)
-            Text("Microfone: \(model.selectedMicrophoneName)")
+            Text(model.recordingMode == .discord ? model.discordConnectionDetail : "Microfone: \(model.selectedMicrophoneName)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -124,7 +137,7 @@ struct MenuBarView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)
-            .disabled(model.isBusy || model.selectedMicrophoneID == nil)
+            .disabled(!model.canBeginRecording)
 
             HStack(spacing: 8) {
                 Button {

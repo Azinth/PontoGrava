@@ -20,6 +20,68 @@ actor TranscriptionService {
         createdAt: Date,
         progress: @escaping @Sendable (Double, String) -> Void
     ) async throws -> URL {
+        let result = try await transcribeSegments(
+            audioURL: audioURL,
+            language: language,
+            progress: progress
+        )
+        return try writeTranscript(
+            segments: result.segments,
+            detectedLanguage: result.detectedLanguage,
+            audioURL: audioURL,
+            createdAt: createdAt,
+            progress: progress
+        )
+    }
+
+    func transcribeDiscord(
+        manifest: DiscordManifest,
+        folder: URL,
+        audioURL: URL,
+        language: TranscriptionLanguage,
+        createdAt: Date,
+        progress: @escaping @Sendable (Double, String) -> Void
+    ) async throws -> URL {
+        var merged: [TranscriptSegment] = []
+        var detectedLanguage: String?
+        let count = max(1, manifest.participants.count)
+
+        for (index, participant) in manifest.participants.enumerated() {
+            let start = Double(index) / Double(count)
+            let share = 1 / Double(count)
+            let trackURL = folder.appendingPathComponent(participant.trackPath)
+            progress(start * 0.9, "Transcrevendo \(participant.displayName)…")
+            do {
+                let result = try await transcribeSegments(
+                    audioURL: trackURL,
+                    language: language
+                ) { value, _ in
+                    progress((start + value * share) * 0.9, "Transcrevendo \(participant.displayName)…")
+                }
+                detectedLanguage = detectedLanguage ?? result.detectedLanguage
+                merged.append(contentsOf: result.segments.map {
+                    TranscriptSegment(start: $0.start, text: $0.text, speaker: participant.displayName)
+                })
+            } catch AppError.transcriptionReturnedNoText {
+                continue
+            }
+        }
+
+        guard !merged.isEmpty else { throw AppError.transcriptionReturnedNoText }
+        return try writeTranscript(
+            segments: merged.sorted { $0.start < $1.start },
+            detectedLanguage: detectedLanguage,
+            audioURL: audioURL,
+            createdAt: createdAt,
+            progress: progress
+        )
+    }
+
+    private func transcribeSegments(
+        audioURL: URL,
+        language: TranscriptionLanguage,
+        progress: @escaping @Sendable (Double, String) -> Void
+    ) async throws -> (segments: [TranscriptSegment], detectedLanguage: String?) {
         progress(0.05, "Carregando o modelo local…")
         let whisper = try await model()
         progress(0.18, "Analisando o áudio…")
@@ -74,8 +136,17 @@ actor TranscriptionService {
             .map { TranscriptSegment(start: $0.start, text: $0.text) }
         guard !segments.isEmpty else { throw AppError.transcriptionReturnedNoText }
 
+        return (segments, results.first?.language)
+    }
+
+    private func writeTranscript(
+        segments: [TranscriptSegment],
+        detectedLanguage: String?,
+        audioURL: URL,
+        createdAt: Date,
+        progress: @escaping @Sendable (Double, String) -> Void
+    ) throws -> URL {
         progress(0.92, "Salvando a transcrição…")
-        let detectedLanguage = results.first?.language
         let text = TranscriptFormatter.format(
             segments: segments,
             createdAt: createdAt,

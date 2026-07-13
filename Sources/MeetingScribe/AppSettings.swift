@@ -10,6 +10,18 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(language.rawValue, forKey: Keys.language) }
     }
 
+    @Published var recordingMode: RecordingMode {
+        didSet { defaults.set(recordingMode.rawValue, forKey: Keys.recordingMode) }
+    }
+
+    @Published var discordGuildID: String? {
+        didSet { defaults.set(discordGuildID, forKey: Keys.discordGuildID) }
+    }
+
+    @Published var discordChannelID: String? {
+        didSet { defaults.set(discordChannelID, forKey: Keys.discordChannelID) }
+    }
+
     @Published var hasCompletedOnboarding: Bool {
         didSet { defaults.set(hasCompletedOnboarding, forKey: Keys.hasCompletedOnboarding) }
     }
@@ -30,6 +42,11 @@ final class AppSettings: ObservableObject {
         language = TranscriptionLanguage(
             rawValue: defaults.string(forKey: Keys.language) ?? "automatic"
         ) ?? .automatic
+        recordingMode = RecordingMode(
+            rawValue: defaults.string(forKey: Keys.recordingMode) ?? "mac"
+        ) ?? .mac
+        discordGuildID = defaults.string(forKey: Keys.discordGuildID)
+        discordChannelID = defaults.string(forKey: Keys.discordChannelID)
         hasCompletedOnboarding = defaults.bool(forKey: Keys.hasCompletedOnboarding)
         hasSeenNotificationInvitation = defaults.bool(forKey: Keys.hasSeenNotificationInvitation)
     }
@@ -48,6 +65,9 @@ final class AppSettings: ObservableObject {
     private enum Keys {
         static let outputFolderPath = "outputFolderPath"
         static let language = "transcriptionLanguage"
+        static let recordingMode = "recordingMode"
+        static let discordGuildID = "discordGuildID"
+        static let discordChannelID = "discordChannelID"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let hasSeenNotificationInvitation = "hasSeenNotificationInvitation"
     }

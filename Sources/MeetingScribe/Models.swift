@@ -211,4 +211,12 @@ enum MeetingNaming {
     static func title(for date: Date, imported: Bool = false) -> String {
         "\(imported ? "Importação" : "Reunião") de \(titleFormatter.string(from: date))"
     }
+
+    static func discordFolderName(for date: Date) -> String {
+        "Discord_\(folderFormatter.string(from: date))"
+    }
+
+    static func discordTitle(channelName: String, date: Date) -> String {
+        "Discord #\(channelName) · \(titleFormatter.string(from: date))"
+    }
 }

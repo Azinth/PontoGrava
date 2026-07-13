@@ -18,11 +18,17 @@ struct ContentView: View {
             }
         }
         .frame(
-            width: isSidebarOpen ? 600 : 420,
-            height: isSidebarOpen ? 360 : (model.isRecordingSession ? 270 : 210)
+            width: isSidebarOpen ? (model.recordingMode == .discord ? 760 : 600) : (model.recordingMode == .discord ? 580 : 420),
+            height: isSidebarOpen ? 410 : compactHeight
         )
         .animation(.easeInOut(duration: 0.18), value: isSidebarOpen)
         .animation(.easeInOut(duration: 0.18), value: model.isRecordingSession)
+        .animation(.easeInOut(duration: 0.18), value: model.recordingMode)
+    }
+
+    private var compactHeight: CGFloat {
+        if model.isRecordingSession { return model.isDiscordRecording ? 250 : 270 }
+        return model.recordingMode == .discord ? 390 : 250
     }
 }
 
@@ -109,7 +115,9 @@ private struct RecorderHomeView: View {
     @EnvironmentObject private var model: AppModel
 
     private var combinedLevel: Float {
-        max(model.systemAudioLevel, model.microphoneAudioLevel)
+        model.isDiscordRecording
+            ? model.discordAudioLevel
+            : max(model.systemAudioLevel, model.microphoneAudioLevel)
     }
 
     var body: some View {
@@ -125,20 +133,35 @@ private struct RecorderHomeView: View {
     }
 
     private var idleView: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             Spacer(minLength: 0)
-            microphoneRow
+            Picker("Origem", selection: $model.recordingMode) {
+                ForEach(RecordingMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(model.isBusy)
+
+            if model.recordingMode == .discord {
+                discordSetup
+            } else {
+                microphoneRow
+            }
             Button {
                 Task { await model.beginRecording() }
             } label: {
-                Label("Iniciar gravação", systemImage: "record.circle")
+                Label(
+                    model.recordingMode == .discord ? "Gravar canal do Discord" : "Iniciar gravação",
+                    systemImage: "record.circle"
+                )
                     .font(.headline)
                     .frame(minWidth: 180)
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)
             .controlSize(.large)
-            .disabled(model.isBusy || model.selectedMicrophoneID == nil)
+            .disabled(!model.canBeginRecording)
 
             if model.phase == .transcribing || model.phase == .finalizing || model.phase == .preparing {
                 VStack(spacing: 6) {
@@ -159,7 +182,7 @@ private struct RecorderHomeView: View {
                 Circle()
                     .fill(model.isPaused ? .orange : .red)
                     .frame(width: 8, height: 8)
-                Text(model.selectedMicrophoneName)
+                Text(model.recordingSourceName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -176,26 +199,39 @@ private struct RecorderHomeView: View {
             )
             .frame(height: 58)
 
-            HStack(spacing: 12) {
-                MainSourceLevelView(title: "Sistema", level: model.systemAudioLevel)
-                MainSourceLevelView(title: "Microfone", level: model.microphoneAudioLevel)
+            if model.isDiscordRecording {
+                Text(
+                    model.discordParticipants.isEmpty
+                        ? "Aguardando participantes falarem…"
+                        : "Participantes: \(model.discordParticipants.joined(separator: ", "))"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            } else {
+                HStack(spacing: 12) {
+                    MainSourceLevelView(title: "Sistema", level: model.systemAudioLevel)
+                    MainSourceLevelView(title: "Microfone", level: model.microphoneAudioLevel)
+                }
             }
 
             HStack(spacing: 16) {
-                Button {
-                    if model.isPaused {
-                        model.resumeRecording()
-                    } else {
-                        model.pauseRecording()
+                if model.canPauseRecording {
+                    Button {
+                        if model.isPaused {
+                            model.resumeRecording()
+                        } else {
+                            model.pauseRecording()
+                        }
+                    } label: {
+                        Image(systemName: model.isPaused ? "play.fill" : "pause.fill")
+                            .font(.title2.weight(.semibold))
+                            .frame(width: 56, height: 42)
                     }
-                } label: {
-                    Image(systemName: model.isPaused ? "play.fill" : "pause.fill")
-                        .font(.title2.weight(.semibold))
-                        .frame(width: 56, height: 42)
+                    .buttonStyle(.borderedProminent)
+                    .tint(model.isPaused ? .orange : .gray)
+                    .help(model.isPaused ? "Continuar" : "Pausar")
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(model.isPaused ? .orange : .gray)
-                .help(model.isPaused ? "Continuar" : "Pausar")
 
                 Button(role: .destructive) {
                     Task { await model.stopRecording() }
@@ -226,6 +262,57 @@ private struct RecorderHomeView: View {
             }
             .help("Atualizar microfones")
             .disabled(model.isBusy)
+        }
+    }
+
+    private var discordSetup: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if !model.discordHasToken {
+                SecureField("Token do bot", text: $model.discordTokenDraft)
+                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    Button("Salvar e conectar") {
+                        Task { await model.saveDiscordTokenAndConnect() }
+                    }
+                    .disabled(model.discordTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Link("Criar bot no Discord", destination: URL(string: "https://discord.com/developers/applications")!)
+                }
+            } else {
+                HStack {
+                    Text(model.discordConnectionDetail)
+                        .font(.caption)
+                        .foregroundStyle(model.discordConnected ? Color.green : Color.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                    Button("Reconectar") { Task { await model.connectDiscord() } }
+                    Button("Remover token") { model.removeDiscordToken() }
+                }
+                if let inviteURL = model.discordInviteURL {
+                    Link("Convidar o bot para outro servidor", destination: inviteURL)
+                        .font(.caption)
+                }
+            }
+
+            if model.discordConnected {
+                HStack(spacing: 10) {
+                    Picker("Servidor", selection: Binding(
+                        get: { model.selectedDiscordGuildID },
+                        set: { id in Task { await model.selectDiscordGuild(id) } }
+                    )) {
+                        Text("Selecione o servidor").tag(Optional<String>.none)
+                        ForEach(model.discordGuilds) { guild in
+                            Text(guild.name).tag(Optional(guild.id))
+                        }
+                    }
+                    Picker("Canal", selection: $model.selectedDiscordChannelID) {
+                        Text("Selecione o canal").tag(Optional<String>.none)
+                        ForEach(model.discordChannels) { channel in
+                            Text("#\(channel.name)").tag(Optional(channel.id))
+                        }
+                    }
+                }
+                .labelsHidden()
+            }
         }
     }
 }
@@ -287,7 +374,7 @@ private struct CollapsedSidebarRail: View {
             .help("Alterar pasta")
             .disabled(model.isBusy)
 
-            if model.isRecordingSession {
+            if model.isRecordingSession && !model.isDiscordRecording {
                 Button {
                     model.showRecordingPanel()
                 } label: {
@@ -344,7 +431,7 @@ private struct SecondarySidebarView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if model.isRecordingSession {
+            if model.isRecordingSession && !model.isDiscordRecording {
                 Button {
                     model.showRecordingPanel()
                 } label: {

@@ -7,6 +7,20 @@ OUTPUT="$ROOT/outputs"
 APP="$OUTPUT/PontoGrava.app"
 export DEVELOPER_DIR="/Library/Developer/CommandLineTools"
 
+NODE=""
+FFMPEG=""
+for CANDIDATE in /opt/homebrew/bin/node /usr/local/bin/node; do
+  [[ -x "$CANDIDATE" ]] && NODE="$CANDIDATE" && break
+done
+for CANDIDATE in /opt/homebrew/bin/ffmpeg /usr/local/bin/ffmpeg; do
+  [[ -x "$CANDIDATE" ]] && FFMPEG="$CANDIDATE" && break
+done
+[[ -n "$NODE" ]] || { echo "Node.js não encontrado em /opt/homebrew/bin ou /usr/local/bin" >&2; exit 1; }
+[[ -n "$FFMPEG" ]] || { echo "FFmpeg não encontrado em /opt/homebrew/bin ou /usr/local/bin" >&2; exit 1; }
+
+cd "$ROOT"
+cd "$ROOT/DiscordBot"
+npm ci --omit=dev
 cd "$ROOT"
 swift build -c "$CONFIGURATION"
 BIN_PATH="$(swift build -c "$CONFIGURATION" --show-bin-path)"
@@ -15,6 +29,11 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH/PontoGrava" "$APP/Contents/MacOS/PontoGrava"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+mkdir -p "$APP/Contents/Resources/DiscordBot"
+cp "$ROOT/DiscordBot/index.js" "$ROOT/DiscordBot/audio.js" \
+  "$ROOT/DiscordBot/package.json" "$ROOT/DiscordBot/package-lock.json" \
+  "$APP/Contents/Resources/DiscordBot/"
+cp -R "$ROOT/DiscordBot/node_modules" "$APP/Contents/Resources/DiscordBot/"
 chmod +x "$APP/Contents/MacOS/PontoGrava"
 
 ICONSET="$ROOT/work/PontoGrava.iconset"

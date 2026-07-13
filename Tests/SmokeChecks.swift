@@ -17,10 +17,17 @@ enum SmokeChecks {
             detectedLanguage: "pt"
         )
         check(text.contains("Arquivo: audio.wav"), "audio filename")
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let named = TranscriptFormatter.format(
+            segments: [TranscriptSegment(start: 4, text: "Olá", speaker: "Ana")],
+            createdAt: date,
+            audioFilename: "audio.wav",
+            detectedLanguage: "pt"
+        )
+        check(named.contains("[00:00:04] Ana: Olá"), "speaker name")
         check(text.contains("[00:00:00] Olá"), "trimmed first segment")
         check(text.contains("[00:01:02] segunda fala"), "second segment timestamp")
 
-        let date = Date(timeIntervalSince1970: 1_700_000_000)
         check(MeetingNaming.folderName(for: date).hasPrefix("Reuniao_"), "meeting folder")
         check(
             MeetingNaming.folderName(for: date, imported: true).hasPrefix("Importacao_"),

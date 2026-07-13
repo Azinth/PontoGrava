@@ -2,3 +2,13 @@
 .build/
 outputs/
 work/
+DiscordBot/node_modules/
+
+# Private local meeting data
+audio.wav
+transcricao.txt
+historico.json
+importacao.caf
+.captura/
+.discord/
+.pontograva-renomeando-*/
