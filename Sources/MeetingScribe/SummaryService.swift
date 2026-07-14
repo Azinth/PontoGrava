@@ -118,7 +118,7 @@ actor SummaryService {
 
         let context = customPrompt.map { $0 + "\n" + transcript } ?? transcript
         let chunks: [String]
-        if await fitsContext(context, model: model) {
+        if fitsContext(context) {
             chunks = [transcript]
         } else {
             chunks = TranscriptChunker.chunks(transcript)
@@ -129,7 +129,6 @@ actor SummaryService {
                 chunks: chunks,
                 customPrompt: customPrompt,
                 language: language,
-                model: model,
                 progress: progress
             )
         }
@@ -137,7 +136,6 @@ actor SummaryService {
         let summary = try await generateDefault(
             chunks: chunks,
             language: language,
-            model: model,
             progress: progress
         )
         return SummaryFormatter.markdown(summary, language: language)
@@ -147,7 +145,6 @@ actor SummaryService {
     private func generateDefault(
         chunks: [String],
         language: SummaryLanguage,
-        model: SystemLanguageModel,
         progress: @escaping @Sendable (Double, String) -> Void
     ) async throws -> MeetingSummary {
         progress(0.12, chunks.count == 1 ? "Gerando o resumo…" : "Resumindo \(chunks.count) trechos…")
@@ -166,7 +163,7 @@ actor SummaryService {
             let combined = summaries
                 .map(SummaryFormatter.consolidationText)
                 .joined(separator: "\n---\n")
-            if await fitsContext(combined, model: model) {
+            if fitsContext(combined) {
                 progress(0.82, "Consolidando o resumo…")
                 return try await generateOne(
                     prompt: SummaryPrompt.consolidation(combined),
@@ -194,7 +191,6 @@ actor SummaryService {
         chunks: [String],
         customPrompt: String,
         language: SummaryLanguage,
-        model: SystemLanguageModel,
         progress: @escaping @Sendable (Double, String) -> Void
     ) async throws -> String {
         let instructions = language.customInstructions(customPrompt)
@@ -213,7 +209,7 @@ actor SummaryService {
 
         while summaries.count > 1 {
             let combined = summaries.joined(separator: "\n\n---\n\n")
-            if await fitsContext(customPrompt + "\n" + combined, model: model) {
+            if fitsContext(customPrompt + "\n" + combined) {
                 progress(0.82, "Consolidando o resumo personalizado…")
                 return SummaryFormatter.customMarkdown(try await generateCustomOne(
                     prompt: SummaryPrompt.customConsolidation(combined),
@@ -286,12 +282,7 @@ actor SummaryService {
     }
 
     @available(macOS 26.0, *)
-    private func fitsContext(_ text: String, model: SystemLanguageModel) async -> Bool {
-        if #available(macOS 26.4, *), let count = try? await model.tokenCount(for: text) {
-            return count <= 3_000
-        }
-        return text.count <= 6_000
-    }
+    private func fitsContext(_ text: String) -> Bool { text.count <= 6_000 }
 
     @available(macOS 26.0, *)
     nonisolated private static func availabilityError(
