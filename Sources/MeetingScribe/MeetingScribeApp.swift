@@ -41,15 +41,8 @@ struct PontoGravaApp: App {
                     Text("Foram encontrados arquivos de \(request.folder.lastPathComponent) que ainda não estão no histórico.")
                 }
         }
-        .defaultSize(width: 420, height: 210)
-        .windowResizability(.contentSize)
-
-        WindowGroup("Histórico", id: "history") {
-            HistoryWindowView()
-                .environmentObject(model)
-                .frame(minWidth: 920, minHeight: 610)
-        }
-        .defaultSize(width: 1_020, height: 680)
+        .defaultSize(width: 1_180, height: 760)
+        .windowResizability(.contentMinSize)
 
         MenuBarExtra(
             "PontoGrava",
