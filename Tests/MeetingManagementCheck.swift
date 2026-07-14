@@ -13,16 +13,19 @@ enum MeetingManagementCheck {
         try FileManager.default.createDirectory(at: originalFolder, withIntermediateDirectories: true)
         let audio = originalFolder.appendingPathComponent("audio.wav")
         let transcript = originalFolder.appendingPathComponent("transcricao.txt")
+        let summary = originalFolder.appendingPathComponent("resumo.md")
         try Data("audio".utf8).write(to: audio)
         try Data("texto".utf8).write(to: transcript)
+        try Data("resumo".utf8).write(to: summary)
 
-        let original = record(folder: originalFolder, transcript: transcript)
+        let original = record(folder: originalFolder, transcript: transcript, summary: summary)
         let service = MeetingFileService()
         let renamed = try service.rename(original, to: "  Reunião Ágil  ")
         check(renamed.title == "Reunião Ágil", "trimmed title")
         check(renamed.folderURL.lastPathComponent == "Reunião Ágil", "renamed folder")
         check(FileManager.default.fileExists(atPath: renamed.audioPath), "audio path updated")
         check(FileManager.default.fileExists(atPath: renamed.transcriptPath!), "transcript path updated")
+        check(FileManager.default.fileExists(atPath: renamed.summaryPath!), "summary path updated")
 
         let freeTitle = "Synca dia 17/06/2026 às 15:07"
         let freeTitleRenamed = try service.rename(renamed, to: freeTitle)
@@ -33,6 +36,7 @@ enum MeetingManagementCheck {
         )
         check(FileManager.default.fileExists(atPath: freeTitleRenamed.audioPath), "free title audio updated")
         check(FileManager.default.fileExists(atPath: freeTitleRenamed.transcriptPath!), "free title transcript updated")
+        check(FileManager.default.fileExists(atPath: freeTitleRenamed.summaryPath!), "free title summary updated")
 
         let caseRenamed = try service.rename(freeTitleRenamed, to: "SYNCA DIA 17/06/2026 ÀS 15:07")
         check(caseRenamed.title == "SYNCA DIA 17/06/2026 ÀS 15:07", "case-only title preserved")
@@ -48,6 +52,12 @@ enum MeetingManagementCheck {
         check(persisted?.folderPath == caseRenamed.folderPath, "renamed folder path persisted")
         check(persisted?.audioPath == caseRenamed.audioPath, "renamed audio path persisted")
         check(persisted?.transcriptPath == caseRenamed.transcriptPath, "renamed transcript path persisted")
+        check(persisted?.summaryPath == caseRenamed.summaryPath, "renamed summary path persisted")
+
+        let legacy = LegacyMeetingRecord(from: caseRenamed)
+        let legacyData = try JSONEncoder().encode(legacy)
+        let migrated = try JSONDecoder().decode(MeetingRecord.self, from: legacyData)
+        check(migrated.summaryPath == nil, "legacy history decodes without summary path")
 
         let collision = root.appendingPathComponent("Existente", isDirectory: true)
         try FileManager.default.createDirectory(at: collision, withIntermediateDirectories: true)
@@ -88,7 +98,7 @@ enum MeetingManagementCheck {
         print("Meeting management checks passed")
     }
 
-    private static func record(folder: URL, transcript: URL?) -> MeetingRecord {
+    private static func record(folder: URL, transcript: URL?, summary: URL? = nil) -> MeetingRecord {
         MeetingRecord(
             id: UUID(),
             createdAt: Date(),
@@ -96,11 +106,38 @@ enum MeetingManagementCheck {
             folderPath: folder.path,
             audioPath: folder.appendingPathComponent("audio.wav").path,
             transcriptPath: transcript?.path,
+            summaryPath: summary?.path,
             duration: 1,
             status: .ready,
             errorMessage: nil,
             microphoneName: "Teste"
         )
+    }
+
+    private struct LegacyMeetingRecord: Codable {
+        let id: UUID
+        let createdAt: Date
+        let title: String
+        let folderPath: String
+        let audioPath: String
+        let transcriptPath: String?
+        let duration: TimeInterval
+        let status: MeetingStatus
+        let errorMessage: String?
+        let microphoneName: String
+
+        init(from record: MeetingRecord) {
+            id = record.id
+            createdAt = record.createdAt
+            title = record.title
+            folderPath = record.folderPath
+            audioPath = record.audioPath
+            transcriptPath = record.transcriptPath
+            duration = record.duration
+            status = record.status
+            errorMessage = record.errorMessage
+            microphoneName = record.microphoneName
+        }
     }
 
     private static func expect(

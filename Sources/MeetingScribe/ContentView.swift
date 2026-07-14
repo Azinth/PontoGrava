@@ -44,6 +44,18 @@ struct ContentView: View {
         } message: { _ in
             Text("Os arquivos já não estão no local registrado. Você pode remover apenas esta entrada do histórico.")
         }
+        .alert(
+            "Substituir o resumo editado?",
+            isPresented: replaceSummaryRequestPresented,
+            presenting: replaceSummaryRecord
+        ) { record in
+            Button("Cancelar", role: .cancel) { model.meetingManagementRequest = nil }
+            Button("Substituir", role: .destructive) {
+                Task { await model.replaceSummary(for: record) }
+            }
+        } message: { _ in
+            Text("O conteúdo atual de resumo.md será substituído por um novo resumo da transcrição salva.")
+        }
     }
 
     private var renameRequest: Binding<MeetingRecord?> {
@@ -83,6 +95,21 @@ struct ContentView: View {
 
     private var orphanRecord: MeetingRecord? {
         guard case let .removeOrphan(record) = model.meetingManagementRequest else { return nil }
+        return record
+    }
+
+    private var replaceSummaryRequestPresented: Binding<Bool> {
+        Binding(
+            get: {
+                if case .replaceSummary = model.meetingManagementRequest { return true }
+                return false
+            },
+            set: { if !$0 { model.meetingManagementRequest = nil } }
+        )
+    }
+
+    private var replaceSummaryRecord: MeetingRecord? {
+        guard case let .replaceSummary(record) = model.meetingManagementRequest else { return nil }
         return record
     }
 }
@@ -179,7 +206,7 @@ private struct AppStatusPill: View {
     private var icon: String {
         switch model.phase {
         case .idle: "checkmark.circle.fill"
-        case .preparing, .finalizing, .transcribing: "hourglass"
+        case .preparing, .finalizing, .transcribing, .summarizing: "hourglass"
         case .recording: "record.circle.fill"
         case .paused: "pause.circle.fill"
         }
@@ -188,7 +215,7 @@ private struct AppStatusPill: View {
     private var color: Color {
         switch model.phase {
         case .idle: .green
-        case .preparing, .finalizing, .transcribing: .blue
+        case .preparing, .finalizing, .transcribing, .summarizing: .blue
         case .recording: .red
         case .paused: .orange
         }
@@ -225,6 +252,7 @@ private struct MeetingRow: View {
 
 private struct SidebarSettings: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showingSummaryPromptEditor = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -256,6 +284,42 @@ private struct SidebarSettings: View {
                 .disabled(model.isBusy)
             }
 
+            Toggle(
+                "Gerar resumo automaticamente",
+                isOn: Binding(
+                    get: { model.settings.automaticallyGenerateSummary },
+                    set: { model.settings.automaticallyGenerateSummary = $0 }
+                )
+            )
+            .toggleStyle(.switch)
+            .font(.caption)
+            .disabled(model.isBusy || model.summaryUnavailableMessage != nil)
+            .help("Gera resumo.md após uma nova transcrição sem substituir resumos existentes.")
+
+            Button {
+                showingSummaryPromptEditor = true
+            } label: {
+                Label(
+                    model.settings.activeCustomSummaryPrompt == nil ? "Prompt padrão" : "Prompt personalizado",
+                    systemImage: "text.badge.gearshape"
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+            .disabled(model.isBusy)
+            .help("Personalizar como os resumos são gerados")
+            .sheet(isPresented: $showingSummaryPromptEditor) {
+                SummaryPromptSettingsView()
+                    .environmentObject(model)
+            }
+
+            if let message = model.summaryUnavailableMessage {
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             HStack(spacing: 8) {
                 SidebarNotificationControl()
                 Spacer()
@@ -270,6 +334,82 @@ private struct SidebarSettings: View {
             }
         }
         .padding(14)
+    }
+}
+
+private struct SummaryPromptSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Prompt do resumo")
+                .font(.title2.bold())
+
+            Toggle(
+                "Usar prompt personalizado",
+                isOn: Binding(
+                    get: { model.settings.usesCustomSummaryPrompt },
+                    set: { model.settings.usesCustomSummaryPrompt = $0 }
+                )
+            )
+
+            Text("Descreva o formato, o nível de detalhe e as informações que devem aparecer. A transcrição e o idioma são adicionados automaticamente.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: Binding(
+                    get: { model.settings.customSummaryPrompt },
+                    set: {
+                        model.settings.customSummaryPrompt = String(
+                            $0.prefix(SummaryPrompt.maximumCustomPromptCharacters)
+                        )
+                    }
+                ))
+                .font(.body.monospaced())
+                .padding(6)
+
+                if model.settings.customSummaryPrompt.isEmpty {
+                    Text("Exemplo: Crie um resumo em Markdown com os principais tópicos, decisões e próximos passos. Seja breve e preserve os nomes dos participantes.")
+                        .font(.body.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 14)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(minHeight: 190)
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.25))
+            }
+            .disabled(!model.settings.usesCustomSummaryPrompt)
+            .opacity(model.settings.usesCustomSummaryPrompt ? 1 : 0.6)
+
+            Text("\(model.settings.customSummaryPrompt.count) de \(SummaryPrompt.maximumCustomPromptCharacters) caracteres")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+
+            Text("Quando desativado, o app usa o formato padrão: o que foi feito, definido e está pendente.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Button("Limpar prompt", role: .destructive) {
+                    model.settings.customSummaryPrompt = ""
+                }
+                .disabled(model.settings.customSummaryPrompt.isEmpty)
+
+                Spacer()
+
+                Button("Concluído") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 600, height: 500)
     }
 }
 
@@ -485,9 +625,9 @@ private struct RecorderPanel: View {
                 }
             }
 
-            if model.phase == .preparing || model.phase == .finalizing || model.phase == .transcribing {
+            if model.phase == .preparing || model.phase == .finalizing || model.phase == .transcribing || model.phase == .summarizing {
                 VStack(alignment: .leading, spacing: 5) {
-                    ProgressView(value: model.phase == .transcribing ? model.progress : nil)
+                    ProgressView(value: model.phase == .transcribing || model.phase == .summarizing ? model.progress : nil)
                     Text(model.statusDetail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -621,9 +761,9 @@ private struct RecorderPanel: View {
 
             recordingControls
 
-            if model.phase == .preparing || model.phase == .finalizing || model.phase == .transcribing {
+            if model.phase == .preparing || model.phase == .finalizing || model.phase == .transcribing || model.phase == .summarizing {
                 VStack(alignment: .leading, spacing: 7) {
-                    ProgressView(value: model.phase == .transcribing ? model.progress : nil)
+                    ProgressView(value: model.phase == .transcribing || model.phase == .summarizing ? model.progress : nil)
                     Text(model.statusDetail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -910,7 +1050,7 @@ private struct MainLiveWaveformView: View {
         switch phase {
         case .recording: max(0.1, CGFloat(level))
         case .paused: 0.18
-        case .preparing, .finalizing, .transcribing: 0.22
+        case .preparing, .finalizing, .transcribing, .summarizing: 0.22
         case .idle: 0.3
         }
     }
@@ -919,7 +1059,7 @@ private struct MainLiveWaveformView: View {
         switch phase {
         case .recording: .red
         case .paused: .orange
-        case .preparing, .finalizing, .transcribing: .blue
+        case .preparing, .finalizing, .transcribing, .summarizing: .blue
         case .idle: .secondary.opacity(0.28)
         }
     }
@@ -1033,7 +1173,7 @@ private struct MeetingDetailView: View {
                         .padding(.horizontal, compact ? 16 : 22)
                         .padding(.vertical, 14)
                     Divider()
-                    TranscriptPreviewView(record: record)
+                    MeetingDocumentsView(record: record)
                         .id(record.id)
                         .padding(compact ? 16 : 22)
                 }
@@ -1094,6 +1234,21 @@ private struct MeetingDetailView: View {
                     .buttonStyle(.bordered)
                     .disabled(model.isBusy)
 
+                    Button {
+                        model.requestSummary(for: record)
+                    } label: {
+                        Label(
+                            model.hasSummary(record) ? "Refazer resumo" : "Gerar resumo",
+                            systemImage: "text.document"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(
+                        model.isBusy
+                            || record.transcriptURL == nil
+                            || model.summaryUnavailableMessage != nil
+                    )
+
                     Spacer()
                     meetingActions(record)
                 }
@@ -1123,6 +1278,14 @@ private struct MeetingDetailView: View {
                 Task { await model.retranscribe(record) }
             }
             .disabled(model.isBusy)
+            Button(model.hasSummary(record) ? "Refazer resumo" : "Gerar resumo") {
+                model.requestSummary(for: record)
+            }
+            .disabled(
+                model.isBusy
+                    || record.transcriptURL == nil
+                    || model.summaryUnavailableMessage != nil
+            )
             Divider()
             Button("Mover para a Lixeira", role: .destructive) {
                 model.presentDelete(record)
@@ -1157,25 +1320,151 @@ private struct MeetingStatusBadge: View {
     }
 }
 
-private struct TranscriptPreviewView: View {
-    let record: MeetingRecord
+private enum MeetingDocumentTab: String, CaseIterable, Identifiable {
+    case summary
+    case transcript
 
-    @State private var text = ""
-    @State private var errorMessage: String?
-    @State private var saveErrorMessage: String?
-    @State private var copied = false
+    var id: String { rawValue }
+    var title: String { self == .summary ? "Resumo" : "Transcrição" }
+}
+
+private struct MeetingDocumentsView: View {
+    let record: MeetingRecord
+    @State private var selectedTab: MeetingDocumentTab
+
+    init(record: MeetingRecord) {
+        self.record = record
+        _selectedTab = State(initialValue: record.summaryPath == nil ? .transcript : .summary)
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Picker("Conteúdo da reunião", selection: $selectedTab) {
+                ForEach(MeetingDocumentTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 320)
+
+            Group {
+                switch selectedTab {
+                case .summary:
+                    SummaryPreviewView(record: record)
+                case .transcript:
+                    TranscriptPreviewView(record: record)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onChange(of: record.summaryPath) { _, value in
+            if value != nil { selectedTab = .summary }
+        }
+    }
+}
+
+private struct SummaryPreviewView: View {
+    @EnvironmentObject private var model: AppModel
+    let record: MeetingRecord
 
     var body: some View {
         Group {
-            if record.transcriptURL == nil {
+            if let url = record.summaryURL {
+                VStack(alignment: .leading, spacing: 10) {
+                    if model.phase == .summarizing, model.summarizingRecordID == record.id {
+                        ProgressView(value: model.progress)
+                        Text(model.statusDetail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    EditableTextFileView(
+                        url: url,
+                        reloadToken: "\(url.path)-\(model.summaryRevision)",
+                        unavailableTitle: "Resumo indisponível",
+                        savedMessage: "Salvo automaticamente em resumo.md",
+                        accessibilityLabel: "Resumo editável"
+                    )
+                }
+            } else if model.phase == .summarizing, model.summarizingRecordID == record.id {
+                VStack(spacing: 12) {
+                    ProgressView(value: model.progress)
+                        .frame(maxWidth: 320)
+                    ContentUnavailableView(
+                        "Gerando resumo",
+                        systemImage: "text.document",
+                        description: Text(model.statusDetail)
+                    )
+                }
+            } else {
+                VStack(spacing: 12) {
+                    ContentUnavailableView(
+                        model.summaryUnavailableMessage == nil ? "Sem resumo" : "Resumo indisponível",
+                        systemImage: "text.document",
+                        description: Text(
+                            model.summaryUnavailableMessage
+                                ?? "Gere um resumo local com o que foi feito, definido e ainda está pendente."
+                        )
+                    )
+                    Button("Gerar resumo") {
+                        model.requestSummary(for: record)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(brandAccent)
+                    .disabled(
+                        model.isBusy
+                            || record.transcriptURL == nil
+                            || model.summaryUnavailableMessage != nil
+                    )
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+private struct TranscriptPreviewView: View {
+    let record: MeetingRecord
+
+    var body: some View {
+        Group {
+            if let url = record.transcriptURL {
+                EditableTextFileView(
+                    url: url,
+                    reloadToken: "\(url.path)-\(record.status.rawValue)",
+                    unavailableTitle: "Transcrição indisponível",
+                    savedMessage: "Salvo automaticamente em transcricao.txt",
+                    accessibilityLabel: "Transcrição editável"
+                )
+            } else {
                 ContentUnavailableView(
                     record.status == .transcribing ? "Transcrevendo" : "Sem transcrição",
                     systemImage: record.status == .transcribing ? "waveform.badge.magnifyingglass" : "doc.text.magnifyingglass",
                     description: record.status == .transcribing ? Text("A transcrição local aparecerá aqui quando estiver pronta.") : nil
                 )
-            } else if let errorMessage {
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+private struct EditableTextFileView: View {
+    let url: URL
+    let reloadToken: String
+    let unavailableTitle: String
+    let savedMessage: String
+    let accessibilityLabel: String
+
+    @State private var text = ""
+    @State private var errorMessage: String?
+    @State private var saveErrorMessage: String?
+    @State private var copied = false
+    @State private var lastLoadedText = ""
+
+    var body: some View {
+        Group {
+            if let errorMessage {
                 ContentUnavailableView(
-                    "Transcrição indisponível",
+                    unavailableTitle,
                     systemImage: "exclamationmark.triangle",
                     description: Text(errorMessage)
                 )
@@ -1183,7 +1472,7 @@ private struct TranscriptPreviewView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 10) {
                         Label(
-                            saveErrorMessage == nil ? "Salvo automaticamente em transcricao.txt" : "Não foi possível salvar",
+                            saveErrorMessage == nil ? savedMessage : "Não foi possível salvar",
                             systemImage: saveErrorMessage == nil ? "checkmark.circle" : "exclamationmark.triangle"
                         )
                         .font(.caption)
@@ -1192,7 +1481,7 @@ private struct TranscriptPreviewView: View {
                         Spacer()
 
                         Button {
-                            copyTranscript()
+                            copyText()
                         } label: {
                             Label(copied ? "Copiado" : "Copiar texto", systemImage: copied ? "checkmark" : "doc.on.doc")
                         }
@@ -1211,7 +1500,7 @@ private struct TranscriptPreviewView: View {
                             RoundedRectangle(cornerRadius: 12)
                                 .stroke(.quaternary, lineWidth: 1)
                         }
-                        .accessibilityLabel("Transcrição editável")
+                        .accessibilityLabel(accessibilityLabel)
 
                     if let saveErrorMessage {
                         Text(saveErrorMessage)
@@ -1223,39 +1512,36 @@ private struct TranscriptPreviewView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear(perform: load)
-        .onChange(of: record.transcriptPath) { _, _ in load() }
-        .onChange(of: record.status) { _, _ in load() }
+        .onChange(of: reloadToken) { _, _ in load() }
         .onChange(of: text) { _, newValue in save(newValue) }
     }
 
     private func load() {
-        guard let url = record.transcriptURL else {
-            text = ""
-            errorMessage = nil
-            saveErrorMessage = nil
-            return
-        }
         do {
-            text = try String(contentsOf: url, encoding: .utf8)
+            let value = try String(contentsOf: url, encoding: .utf8)
+            lastLoadedText = value
+            text = value
             errorMessage = nil
             saveErrorMessage = nil
         } catch {
+            lastLoadedText = ""
             text = ""
             errorMessage = error.localizedDescription
         }
     }
 
     private func save(_ value: String) {
-        guard let url = record.transcriptURL else { return }
+        guard value != lastLoadedText else { return }
         do {
             try value.write(to: url, atomically: true, encoding: .utf8)
+            lastLoadedText = value
             saveErrorMessage = nil
         } catch {
             saveErrorMessage = error.localizedDescription
         }
     }
 
-    private func copyTranscript() {
+    private func copyText() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         copied = true

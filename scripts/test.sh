@@ -16,6 +16,18 @@ export DEVELOPER_DIR="/Library/Developer/CommandLineTools"
 
 /usr/bin/xcrun swiftc \
   -parse-as-library \
+  "$ROOT/Sources/MeetingScribe/Models.swift" \
+  "$ROOT/Sources/MeetingScribe/DiscordIntegration.swift" \
+  "$ROOT/Sources/MeetingScribe/AppSettings.swift" \
+  "$ROOT/Sources/MeetingScribe/SummarySupport.swift" \
+  "$ROOT/Tests/SummaryChecks.swift" \
+  -framework Security \
+  -o "$ROOT/work/tests/SummaryChecks"
+
+"$ROOT/work/tests/SummaryChecks"
+
+/usr/bin/xcrun swiftc \
+  -parse-as-library \
   "$ROOT/Sources/MeetingScribe/DiscordIntegration.swift" \
   "$ROOT/Tests/DiscordIntegrationCheck.swift" \
   -framework Security \

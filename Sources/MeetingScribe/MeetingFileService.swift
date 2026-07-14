@@ -79,6 +79,9 @@ final class MeetingFileService {
         renamed.transcriptPath = record.transcriptPath.map {
             relocatedPath($0, from: source, to: destination)
         }
+        renamed.summaryPath = record.summaryPath.map {
+            relocatedPath($0, from: source, to: destination)
+        }
         return renamed
     }
 

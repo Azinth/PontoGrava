@@ -45,6 +45,7 @@ struct MeetingRecord: Identifiable, Codable, Hashable {
     var folderPath: String
     var audioPath: String
     var transcriptPath: String?
+    var summaryPath: String? = nil
     var duration: TimeInterval
     var status: MeetingStatus
     var errorMessage: String?
@@ -53,6 +54,7 @@ struct MeetingRecord: Identifiable, Codable, Hashable {
     var folderURL: URL { URL(fileURLWithPath: folderPath) }
     var audioURL: URL { URL(fileURLWithPath: audioPath) }
     var transcriptURL: URL? { transcriptPath.map(URL.init(fileURLWithPath:)) }
+    var summaryURL: URL? { summaryPath.map(URL.init(fileURLWithPath:)) }
 }
 
 struct AudioInputDevice: Identifiable, Hashable {
@@ -68,6 +70,7 @@ enum AppPhase: Equatable {
     case paused
     case finalizing
     case transcribing
+    case summarizing
 
     var title: String {
         switch self {
@@ -77,6 +80,7 @@ enum AppPhase: Equatable {
         case .paused: "Gravação pausada"
         case .finalizing: "Finalizando o WAV"
         case .transcribing: "Transcrevendo localmente"
+        case .summarizing: "Gerando resumo local"
         }
     }
 }
@@ -160,18 +164,24 @@ enum MeetingManagementRequest: Identifiable {
     case rename(MeetingRecord)
     case delete(MeetingRecord)
     case removeOrphan(MeetingRecord)
+    case replaceSummary(MeetingRecord)
 
     var id: String {
         switch self {
         case let .rename(record): "rename-\(record.id)"
         case let .delete(record): "delete-\(record.id)"
         case let .removeOrphan(record): "orphan-\(record.id)"
+        case let .replaceSummary(record): "summary-\(record.id)"
         }
     }
 
     var record: MeetingRecord {
         switch self {
-        case let .rename(record), let .delete(record), let .removeOrphan(record): record
+        case let .rename(record),
+             let .delete(record),
+             let .removeOrphan(record),
+             let .replaceSummary(record):
+            record
         }
     }
 }

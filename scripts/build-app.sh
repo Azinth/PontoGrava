@@ -5,7 +5,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIGURATION="${1:-release}"
 OUTPUT="$ROOT/outputs"
 APP="$OUTPUT/PontoGrava.app"
-export DEVELOPER_DIR="/Library/Developer/CommandLineTools"
+
+SDK="$(xcrun --show-sdk-path)"
+[[ -d "$SDK/System/Library/Frameworks/FoundationModels.framework" ]] || {
+  echo "Xcode 26 ou mais recente é necessário para compilar os resumos locais." >&2
+  exit 1
+}
 
 NODE=""
 FFMPEG=""

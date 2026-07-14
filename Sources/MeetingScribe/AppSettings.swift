@@ -30,6 +30,18 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(hasSeenNotificationInvitation, forKey: Keys.hasSeenNotificationInvitation) }
     }
 
+    @Published var automaticallyGenerateSummary: Bool {
+        didSet { defaults.set(automaticallyGenerateSummary, forKey: Keys.automaticallyGenerateSummary) }
+    }
+
+    @Published var usesCustomSummaryPrompt: Bool {
+        didSet { defaults.set(usesCustomSummaryPrompt, forKey: Keys.usesCustomSummaryPrompt) }
+    }
+
+    @Published var customSummaryPrompt: String {
+        didSet { defaults.set(customSummaryPrompt, forKey: Keys.customSummaryPrompt) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -49,10 +61,19 @@ final class AppSettings: ObservableObject {
         discordChannelID = defaults.string(forKey: Keys.discordChannelID)
         hasCompletedOnboarding = defaults.bool(forKey: Keys.hasCompletedOnboarding)
         hasSeenNotificationInvitation = defaults.bool(forKey: Keys.hasSeenNotificationInvitation)
+        automaticallyGenerateSummary = defaults.bool(forKey: Keys.automaticallyGenerateSummary)
+        usesCustomSummaryPrompt = defaults.bool(forKey: Keys.usesCustomSummaryPrompt)
+        customSummaryPrompt = defaults.string(forKey: Keys.customSummaryPrompt) ?? ""
     }
 
     var outputFolderURL: URL {
         URL(fileURLWithPath: outputFolderPath, isDirectory: true)
+    }
+
+    var activeCustomSummaryPrompt: String? {
+        guard usesCustomSummaryPrompt else { return nil }
+        let value = customSummaryPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 
     func ensureOutputFolder() throws {
@@ -70,5 +91,8 @@ final class AppSettings: ObservableObject {
         static let discordChannelID = "discordChannelID"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let hasSeenNotificationInvitation = "hasSeenNotificationInvitation"
+        static let automaticallyGenerateSummary = "automaticallyGenerateSummary"
+        static let usesCustomSummaryPrompt = "usesCustomSummaryPrompt"
+        static let customSummaryPrompt = "customSummaryPrompt"
     }
 }
