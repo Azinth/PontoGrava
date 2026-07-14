@@ -33,6 +33,8 @@ final class AppModel: ObservableObject {
     @Published var meetingManagementRequest: MeetingManagementRequest?
     @Published var notificationPermissionState: NotificationPermissionState = .unknown
     @Published var showNotificationInvitation = false
+    @Published private(set) var summaryRevision = 0
+    @Published private(set) var summarizingRecordID: UUID?
     @Published private(set) var recordingTimeline = RecordingTimeline()
     @Published private(set) var systemAudioLevel: Float = 0
     @Published private(set) var microphoneAudioLevel: Float = 0
@@ -49,6 +51,7 @@ final class AppModel: ObservableObject {
 
     private let recordingEngine = RecordingEngine()
     private let transcriptionService = TranscriptionService()
+    private let summaryService = SummaryService()
     private let discordBotClient = DiscordBotClient()
     private let meetingFileService: MeetingFileService
     private var activeFolder: URL?
@@ -100,6 +103,7 @@ final class AppModel: ObservableObject {
     var isDiscordRecording: Bool { isRecordingSession && activeDiscordRecording }
     var canPauseRecording: Bool { isRecordingSession && !activeDiscordRecording }
     var recordingStartedAt: Date? { recordingTimeline.startedAt }
+    var summaryUnavailableMessage: String? { SummaryService.unavailabilityMessage }
 
     var canBeginRecording: Bool {
         guard phase == .idle else { return false }
@@ -142,6 +146,7 @@ final class AppModel: ObservableObject {
         }
         refreshMicrophones()
         detectDiscordRecoverySession()
+        restoreSummaryPaths()
         if discordHasToken { await connectDiscord() }
         if selectedRecordID == nil { selectedRecordID = records.first?.id }
         await refreshNotificationPermission()
@@ -313,6 +318,24 @@ final class AppModel: ObservableObject {
         mutable.errorMessage = nil
         meetingStore.upsert(mutable)
         await transcribe(&mutable)
+    }
+
+    func requestSummary(for record: MeetingRecord) {
+        guard phase == .idle, record.transcriptURL != nil else { return }
+        if hasSummary(record) {
+            meetingManagementRequest = .replaceSummary(record)
+        } else {
+            Task { await generateSummary(for: record, overwrite: false) }
+        }
+    }
+
+    func replaceSummary(for record: MeetingRecord) async {
+        meetingManagementRequest = nil
+        await generateSummary(for: record, overwrite: true)
+    }
+
+    func hasSummary(_ record: MeetingRecord) -> Bool {
+        FileManager.default.fileExists(atPath: summaryURL(for: record).path)
     }
 
     func chooseOutputFolder() {
@@ -575,6 +598,7 @@ final class AppModel: ObservableObject {
         phase = .transcribing
         progress = 0.02
         statusDetail = "Preparando o Whisper local…"
+        var shouldGenerateSummary = false
         do {
             let reportProgress: @Sendable (Double, String) -> Void = { [weak self] value, detail in
                 Task { @MainActor in
@@ -607,6 +631,7 @@ final class AppModel: ObservableObject {
             progress = 1
             statusDetail = "WAV e transcrição salvos."
             await notificationService.notifyTranscriptionFinished(for: record, succeeded: true)
+            shouldGenerateSummary = settings.automaticallyGenerateSummary && record.summaryPath == nil
         } catch {
             record.status = .failed
             record.errorMessage = error.localizedDescription
@@ -616,6 +641,60 @@ final class AppModel: ObservableObject {
             await notificationService.notifyTranscriptionFinished(for: record, succeeded: false)
         }
         phase = .idle
+        if shouldGenerateSummary {
+            await generateSummary(for: record, overwrite: false)
+        }
+    }
+
+    private func generateSummary(for record: MeetingRecord, overwrite: Bool) async {
+        guard phase == .idle, let transcriptURL = record.transcriptURL else { return }
+        phase = .summarizing
+        summarizingRecordID = record.id
+        progress = 0.02
+        statusDetail = "Preparando o resumo local…"
+        defer {
+            summarizingRecordID = nil
+            phase = .idle
+        }
+
+        do {
+            let reportProgress: @Sendable (Double, String) -> Void = { [weak self] value, detail in
+                Task { @MainActor in
+                    self?.progress = value
+                    self?.statusDetail = detail
+                }
+            }
+            let url = try await summaryService.generate(
+                transcriptURL: transcriptURL,
+                folderURL: record.folderURL,
+                overwrite: overwrite,
+                customPrompt: settings.activeCustomSummaryPrompt,
+                progress: reportProgress
+            )
+            var updated = meetingStore.records.first(where: { $0.id == record.id }) ?? record
+            updated.summaryPath = url.path
+            meetingStore.upsert(updated)
+            summaryRevision += 1
+            progress = 1
+            statusDetail = "Resumo salvo em resumo.md."
+        } catch {
+            warningMessage = "A transcrição foi preservada, mas o resumo não pôde ser gerado: \(error.localizedDescription)"
+            statusDetail = "Transcrição preservada. Você pode tentar gerar o resumo novamente."
+        }
+    }
+
+    private func summaryURL(for record: MeetingRecord) -> URL {
+        record.summaryURL ?? record.folderURL.appendingPathComponent("resumo.md")
+    }
+
+    private func restoreSummaryPaths() {
+        for record in records where record.summaryPath == nil {
+            let url = summaryURL(for: record)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            var updated = record
+            updated.summaryPath = url.path
+            meetingStore.upsert(updated)
+        }
     }
 
     private func uniqueMeetingFolder(for date: Date, imported: Bool) -> URL {
