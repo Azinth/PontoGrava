@@ -12,6 +12,7 @@ Whisper executam localmente no computador.
 - Gravação de canais do Discord com identificação dos participantes.
 - Soundwave e cronômetro em tempo real.
 - Transcrição local com WhisperKit e seleção de idioma.
+- Resumo local editável com trabalho realizado, decisões e pendências.
 - Histórico com reprodução, edição, retranscrição e acesso pelo Finder.
 - Importação de arquivos de áudio já existentes.
 
@@ -45,6 +46,7 @@ pausar, continuar ou parar.
 - Mac com Apple Silicon.
 - macOS 15 ou mais recente.
 - Internet no primeiro uso para baixar o modelo Whisper.
+- Para gerar resumos: macOS 26.1 ou mais recente com Apple Intelligence ativado.
 - Para gravar o Discord: Node.js 22.12 ou mais recente e FFmpeg.
 
 Swift e Xcode **não são necessários** para instalar a versão pronta.
@@ -82,6 +84,14 @@ PontoGrava novamente.
 
 O app combina sistema e microfone no mesmo WAV. As pausas são removidas do
 áudio, da duração e dos timestamps da transcrição.
+
+Depois da transcrição, abra a aba **Resumo** e clique em **Gerar resumo**. O
+resultado é produzido no Mac, pode ser editado no app e fica salvo em
+`resumo.md`, separado em **O que foi feito**, **O que foi definido** e
+**O que está pendente**. A opção de geração automática fica desativada por padrão e pode
+ser ativada na barra lateral; ela nunca substitui um resumo existente. Em **Prompt padrão**,
+você também pode ativar e salvar instruções próprias para escolher o formato e o foco dos
+resumos. A transcrição e o idioma são adicionados automaticamente ao prompt.
 
 ## Gravar um canal do Discord
 
@@ -125,7 +135,8 @@ Por padrão, cada reunião fica em uma subpasta de `~/Documents/PontoGrava`:
 ```text
 Reuniao_2026-07-13_14-30-00/
 ├── audio.wav
-└── transcricao.txt
+├── transcricao.txt
+└── resumo.md
 ```
 
 Gravações do Discord também mantêm faixas individuais e um manifesto dentro da
@@ -133,6 +144,7 @@ subpasta oculta `.discord/`. Isso permite refazer a transcrição preservando os
 nomes dos participantes.
 
 - Áudio e transcrição não são enviados para servidores do PontoGrava.
+- O resumo usa o modelo local do Apple Intelligence e também não é enviado para servidores.
 - O modelo Whisper é baixado no primeiro uso e depois executado localmente.
 - O token do Discord é armazenado no **Chaves do macOS**, nunca nas pastas das reuniões.
 - O repositório ignora gravações, transcrições, históricos e arquivos temporários.
@@ -170,14 +182,20 @@ quando o bot recebe áudio real.
 Na primeira execução, o app baixa e prepara o modelo Whisper para Core ML. As
 transcrições seguintes reutilizam o modelo local e tendem a iniciar mais rápido.
 
+### O resumo local não está disponível
+
+Confirme que o Mac usa macOS 26.1 ou mais recente e que o Apple Intelligence
+está ativado e terminou de baixar o modelo. O PontoGrava também verifica se o
+idioma da transcrição é compatível antes de gerar o resumo.
+
 Se o problema continuar, abra uma [issue](https://github.com/Azinth/PontoGrava/issues)
 informando a versão do macOS, o modelo do Mac e a mensagem exibida pelo app. Não
 anexe gravações, transcrições ou tokens.
 
 ## Desenvolvimento
 
-Para compilar o projeto são necessários Swift 6, Xcode 16 ou Command Line Tools
-compatíveis, Node.js e FFmpeg.
+Para compilar o projeto são necessários Swift 6, Xcode 26 ou mais recente,
+Node.js e FFmpeg.
 
 ```bash
 git clone https://github.com/Azinth/PontoGrava.git
