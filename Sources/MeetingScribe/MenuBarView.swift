@@ -1,5 +1,7 @@
 import SwiftUI
 
+private let menuAccent = Color(red: 0.79, green: 0.35, blue: 0.21)
+
 struct MenuBarView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.openWindow) private var openWindow
@@ -11,7 +13,29 @@ struct MenuBarView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: model.isRecordingSession ? "record.circle.fill" : "waveform.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(model.isRecordingSession ? .red : menuAccent)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("PontoGrava")
+                        .font(.headline)
+                    Text(model.phase.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if model.isRecordingSession {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(menuDuration(model.recordedDuration(at: context.date)))
+                            .font(.headline.monospacedDigit())
+                            .foregroundStyle(model.isPaused ? .orange : .red)
+                    }
+                }
+            }
+
             if model.isRecordingSession {
                 recordingMonitor
             } else {
@@ -24,13 +48,16 @@ struct MenuBarView: View {
                 Button {
                     openWindow(id: "main")
                 } label: {
-                    Label("Abrir", systemImage: "macwindow")
+                    Label("Abrir app", systemImage: "macwindow")
                 }
 
                 Button {
-                    openWindow(id: "history")
+                    if model.selectedRecordID == nil {
+                        model.selectedRecordID = model.records.first?.id
+                    }
+                    openWindow(id: "main")
                 } label: {
-                    Label("Histórico", systemImage: "clock.arrow.circlepath")
+                    Label("Reuniões", systemImage: "clock.arrow.circlepath")
                 }
 
                 Spacer()
@@ -41,42 +68,36 @@ struct MenuBarView: View {
                     Image(systemName: "power")
                 }
                 .help("Sair")
+                .accessibilityLabel("Sair do PontoGrava")
             }
             .buttonStyle(.bordered)
         }
-        .padding(14)
-        .frame(width: 340)
+        .padding(16)
+        .frame(width: 360)
+        .tint(menuAccent)
     }
 
     private var recordingMonitor: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 9) {
-                Circle()
-                    .fill(model.isPaused ? .orange : .red)
-                    .frame(width: 9, height: 9)
-                Text(model.isPaused ? "Gravação pausada" : "Gravando")
-                    .font(.headline)
-                Spacer()
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(TranscriptFormatter.timestamp(model.recordedDuration(at: context.date)))
-                        .font(.headline.monospacedDigit())
-                        .foregroundStyle(model.isPaused ? .orange : .red)
-                }
-            }
-
-            Text(model.recordingSourceName)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            Label(
+                model.isPaused ? "Gravação pausada" : model.recordingSourceName,
+                systemImage: model.isPaused ? "pause.circle.fill" : "record.circle.fill"
+            )
+            .font(.callout.weight(.medium))
+            .foregroundStyle(model.isPaused ? .orange : .primary)
+            .lineLimit(2)
 
             LiveWaveformView(level: combinedLevel, isPaused: model.isPaused)
-                .frame(height: 52)
+                .frame(height: 56)
+                .padding(.horizontal, 8)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
 
             if model.isDiscordRecording {
-                Text(
+                Label(
                     model.discordParticipants.isEmpty
                         ? "Aguardando participantes…"
-                        : model.discordParticipants.joined(separator: ", ")
+                        : model.discordParticipants.joined(separator: ", "),
+                    systemImage: "person.2.wave.2"
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -89,23 +110,18 @@ struct MenuBarView: View {
             }
 
             HStack(spacing: 10) {
-                if model.isPaused {
+                if model.canPauseRecording {
                     Button {
-                        model.resumeRecording()
+                        model.isPaused ? model.resumeRecording() : model.pauseRecording()
                     } label: {
-                        Label("Continuar", systemImage: "play.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.orange)
-                } else if model.canPauseRecording {
-                    Button {
-                        model.pauseRecording()
-                    } label: {
-                        Label("Pausar", systemImage: "pause.fill")
-                            .frame(maxWidth: .infinity)
+                        Label(
+                            model.isPaused ? "Continuar" : "Pausar",
+                            systemImage: model.isPaused ? "play.fill" : "pause.fill"
+                        )
+                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
+                    .tint(model.isPaused ? .orange : .primary)
                 }
 
                 Button(role: .destructive) {
@@ -118,25 +134,61 @@ struct MenuBarView: View {
                 .tint(.red)
             }
         }
+        .padding(14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var idleActions: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("PontoGrava")
-                .font(.headline)
+            Picker("Origem da gravação", selection: $model.recordingMode) {
+                ForEach(RecordingMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .disabled(model.isBusy)
+            .accessibilityLabel("Origem da gravação")
+
             Text(model.recordingMode == .discord ? model.discordConnectionDetail : "Microfone: \(model.selectedMicrophoneName)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(2)
+
+            if model.recordingMode == .discord && model.discordConnected {
+                VStack(spacing: 8) {
+                    Picker("Servidor", selection: Binding(
+                        get: { model.selectedDiscordGuildID },
+                        set: { id in Task { await model.selectDiscordGuild(id) } }
+                    )) {
+                        Text("Selecione o servidor").tag(Optional<String>.none)
+                        ForEach(model.discordGuilds) { guild in
+                            Text(guild.name).tag(Optional(guild.id))
+                        }
+                    }
+
+                    Picker("Canal", selection: $model.selectedDiscordChannelID) {
+                        Text("Selecione o canal").tag(Optional<String>.none)
+                        ForEach(model.discordChannels) { channel in
+                            Text("#\(channel.name)").tag(Optional(channel.id))
+                        }
+                    }
+                }
+                .disabled(model.isBusy)
+            }
 
             Button {
                 Task { await model.beginRecording() }
             } label: {
-                Label("Iniciar gravação", systemImage: "record.circle")
-                    .frame(maxWidth: .infinity)
+                Label(
+                    model.recordingMode == .discord ? "Gravar canal do Discord" : "Iniciar gravação",
+                    systemImage: "record.circle"
+                )
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.red)
+            .tint(menuAccent)
+            .controlSize(.large)
             .disabled(!model.canBeginRecording)
 
             HStack(spacing: 8) {
@@ -144,6 +196,7 @@ struct MenuBarView: View {
                     model.presentImportPanel()
                 } label: {
                     Label("Importar", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity)
                 }
                 .disabled(model.isBusy)
 
@@ -151,9 +204,18 @@ struct MenuBarView: View {
                     model.openOutputFolder()
                 } label: {
                     Label("Pasta", systemImage: "folder")
+                        .frame(maxWidth: .infinity)
                 }
             }
             .buttonStyle(.bordered)
         }
     }
+}
+
+private func menuDuration(_ interval: TimeInterval) -> String {
+    let seconds = max(0, Int(interval))
+    if seconds >= 3_600 {
+        return String(format: "%02d:%02d:%02d", seconds / 3_600, (seconds / 60) % 60, seconds % 60)
+    }
+    return String(format: "%02d:%02d", seconds / 60, seconds % 60)
 }
