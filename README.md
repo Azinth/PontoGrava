@@ -15,6 +15,29 @@ Whisper executam localmente no computador.
 - Histórico com reprodução, edição, retranscrição e acesso pelo Finder.
 - Importação de arquivos de áudio já existentes.
 
+## Interface
+
+### Área de trabalho unificada
+
+<p align="center">
+  <img src="docs/images/pontograva-main-window.jpeg" width="920" alt="Janela principal do PontoGrava">
+</p>
+
+A janela principal reúne o histórico pesquisável, a configuração da gravação, o
+player e a transcrição editável. Em janelas menores, o gravador vira uma faixa
+compacta no topo e deixa o espaço restante para ouvir e revisar a reunião.
+
+### Barra de menus
+
+<p align="center">
+  <img src="docs/images/pontograva-menu-bar.png" width="920" alt="Controles do PontoGrava na barra de menus">
+</p>
+
+O popup permite alternar entre gravação no Mac e no Discord sem abrir a janela
+principal. No modo Discord, também é possível escolher o servidor e o canal;
+durante uma gravação, o mesmo painel mostra duração, níveis e ações de
+pausar, continuar ou parar.
+
 ## Baixar e instalar
 
 ### Requisitos

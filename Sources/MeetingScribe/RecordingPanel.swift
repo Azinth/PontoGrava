@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 
+private let panelAccent = Color(red: 0.79, green: 0.35, blue: 0.21)
+
 @MainActor
 final class RecordingPanelController: NSObject, NSWindowDelegate {
     static let shared = RecordingPanelController()
@@ -26,7 +28,7 @@ final class RecordingPanelController: NSObject, NSWindowDelegate {
     }
 
     private func makePanel(model: AppModel) -> NSPanel {
-        let size = NSSize(width: 430, height: 248)
+        let size = NSSize(width: 450, height: 270)
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
@@ -72,14 +74,15 @@ struct RecordingPanelView: View {
     }
 
     var body: some View {
-        VStack(spacing: 15) {
+        VStack(spacing: 16) {
             HStack(spacing: 10) {
-                Circle()
-                    .fill(model.isPaused ? .orange : .red)
-                    .frame(width: 10, height: 10)
+                Image(systemName: model.isPaused ? "pause.circle.fill" : "record.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(model.isPaused ? .orange : .red)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(model.isPaused ? "Gravação pausada" : "Gravando reunião")
-                        .font(.headline)
+                        .font(.system(.headline, design: .serif, weight: .semibold))
                     Text(model.selectedMicrophoneName)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -102,7 +105,9 @@ struct RecordingPanelView: View {
             }
 
             LiveWaveformView(level: combinedLevel, isPaused: model.isPaused)
-                .frame(height: 62)
+                .frame(height: 64)
+                .padding(.horizontal, 8)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
 
             HStack(spacing: 12) {
                 SourceLevelView(title: "Sistema", level: model.systemAudioLevel)
@@ -136,9 +141,10 @@ struct RecordingPanelView: View {
                 .tint(.red)
             }
         }
-        .padding(18)
-        .frame(width: 430, height: 248)
-        .background(.ultraThinMaterial)
+        .padding(20)
+        .frame(width: 450, height: 270)
+        .background(.regularMaterial)
+        .tint(panelAccent)
     }
 }
 
@@ -187,6 +193,9 @@ struct SourceLevelView: View {
             }
             .frame(height: 5)
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 9))
         .frame(maxWidth: .infinity)
     }
 }
