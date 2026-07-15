@@ -22,6 +22,7 @@ import {
   readSession,
   recordingCommandError,
   safeName,
+  startRecordingCommandError,
   writeJSONAtomic
 } from './audio.js';
 
@@ -30,9 +31,11 @@ const client = new Client({
 });
 const ffmpegPath = locateFFmpeg();
 let recording = null;
+let pendingStart = null;
 let emptyTimer = null;
 let isShuttingDown = false;
 const recordingCommands = [
+  { name: 'start', description: 'Inicia a gravação do canal de voz atual com o PontoGrava.' },
   { name: 'stop', description: 'Encerra e finaliza a gravação ativa do PontoGrava.' }
 ];
 const recordingCommandNames = new Set(recordingCommands.map(command => command.name));
@@ -161,6 +164,12 @@ function scheduleEmptyStop() {
 
 async function startRecording(command) {
   if (recording) throw new Error('Já existe uma gravação do Discord em andamento.');
+  if (command.requestId && command.requestId !== pendingStart?.id) {
+    throw new Error('A solicitação de início não está mais ativa.');
+  }
+  if (!command.requestId && pendingStart) {
+    throw new Error('Outra gravação do Discord já está sendo iniciada.');
+  }
   if (!client.isReady()) throw new Error('Conecte o bot antes de iniciar.');
   const guild = client.guilds.cache.get(command.guildId);
   const channel = guild?.channels.cache.get(command.channelId);
@@ -267,8 +276,44 @@ async function rejectInteraction(interaction, message) {
   await interaction.reply({ content: message, ephemeral: true });
 }
 
-async function handleInteraction(interaction) {
-  if (!interaction.isChatInputCommand() || !recordingCommandNames.has(interaction.commandName)) return;
+async function finishStartRequest(requestId, message) {
+  if (!pendingStart || pendingStart.id !== requestId) return;
+  const interaction = pendingStart.interaction;
+  pendingStart = null;
+  try {
+    await interaction.editReply(message);
+  } catch (error) {
+    process.stderr.write(`Discord /start reply: ${error.message}\n`);
+  }
+}
+
+async function handleStartInteraction(interaction) {
+  const validationError = startRecordingCommandError(
+    recording,
+    pendingStart,
+    interaction.channelId,
+    interaction.member?.voice?.channelId
+  );
+  if (validationError) {
+    await rejectInteraction(interaction, validationError);
+    return;
+  }
+
+  pendingStart = { id: interaction.id, interaction };
+  try {
+    await interaction.deferReply({ ephemeral: true });
+  } catch (error) {
+    if (pendingStart?.id === interaction.id) pendingStart = null;
+    throw error;
+  }
+  event('recordingStartRequested', {
+    requestId: interaction.id,
+    guildId: interaction.guildId,
+    channelId: interaction.channelId
+  });
+}
+
+async function handleStopInteraction(interaction) {
   const validationError = recordingCommandError(
     recording,
     interaction.guildId,
@@ -298,6 +343,12 @@ async function handleInteraction(interaction) {
   }
 }
 
+async function handleInteraction(interaction) {
+  if (!interaction.isChatInputCommand() || !recordingCommandNames.has(interaction.commandName)) return;
+  if (interaction.commandName === 'start') await handleStartInteraction(interaction);
+  else await handleStopInteraction(interaction);
+}
+
 client.on('voiceStateUpdate', (oldState, newState) => {
   if (!recording) return;
   if (oldState.channelId === recording.channel.id || newState.channelId === recording.channel.id) {
@@ -316,7 +367,26 @@ async function handle(command) {
   case 'connect': return connect(command.token);
   case 'listGuilds': return { guilds: guilds() };
   case 'listChannels': return { channels: channels(command.guildId) };
-  case 'start': return startRecording(command);
+  case 'start': {
+    try {
+      const result = await startRecording(command);
+      if (command.requestId) {
+        await finishStartRequest(command.requestId, '🔴 Gravação iniciada neste canal.');
+      }
+      return result;
+    } catch (error) {
+      if (command.requestId) {
+        await finishStartRequest(
+          command.requestId,
+          '⚠️ Não foi possível iniciar a gravação. Verifique o PontoGrava no Mac.'
+        );
+      }
+      throw error;
+    }
+  }
+  case 'rejectStart':
+    await finishStartRequest(command.requestId, command.message);
+    return {};
   case 'stop': return stopRecording('manual');
   case 'recover': {
     const session = readSession(command.folderPath);

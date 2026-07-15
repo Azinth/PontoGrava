@@ -15,6 +15,7 @@ import {
   participantFilter,
   recordingCommandError,
   safeName,
+  startRecordingCommandError,
   writeJSONAtomic
 } from './audio.js';
 
@@ -75,6 +76,14 @@ test('accepts stop only in the active channel and while not finalizing', () => {
   assert.equal(recordingCommandError(active, 'guild', 'channel'), null);
   active.stopping = true;
   assert.match(recordingCommandError(active, 'guild', 'channel'), /finalizada/);
+});
+
+test('accepts start only from the member voice channel while idle', () => {
+  assert.match(startRecordingCommandError({}, null, 'channel', 'channel'), /Já existe/);
+  assert.match(startRecordingCommandError(null, {}, 'channel', 'channel'), /sendo iniciada/);
+  assert.match(startRecordingCommandError(null, null, 'text', 'voice'), /chat do canal/);
+  assert.match(startRecordingCommandError(null, null, 'voice', null), /chat do canal/);
+  assert.equal(startRecordingCommandError(null, null, 'voice', 'voice'), null);
 });
 
 test('loads the Opus decoder used for received voice packets', () => {

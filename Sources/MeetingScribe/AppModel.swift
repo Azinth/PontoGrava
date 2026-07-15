@@ -756,21 +756,53 @@ final class AppModel: ObservableObject {
         errorMessage = error.localizedDescription
     }
 
-    private func beginDiscordRecording() async {
-        guard phase == .idle,
-              discordConnected,
-              let guildID = selectedDiscordGuildID,
-              let channelID = selectedDiscordChannelID else { return }
+    private func beginDiscordRecording(request: DiscordStartRequest? = nil) async {
+        guard phase == .idle else {
+            if let request {
+                await discordBotClient.rejectStart(
+                    requestId: request.requestId,
+                    message: "O PontoGrava está ocupado no Mac. Aguarde a operação atual terminar."
+                )
+            }
+            return
+        }
+        guard discordConnected,
+              let guildID = request?.guildId ?? selectedDiscordGuildID,
+              let channelID = request?.channelId ?? selectedDiscordChannelID else {
+            if let request {
+                await discordBotClient.rejectStart(
+                    requestId: request.requestId,
+                    message: "O bot não está conectado ao PontoGrava no Mac."
+                )
+            }
+            return
+        }
+        if request != nil {
+            recordingMode = .discord
+            selectedDiscordGuildID = guildID
+            selectedDiscordChannelID = channelID
+        }
         playbackController.pause()
         phase = .preparing
         progress = 0
         discordAudioLevel = 0
         statusDetail = "Conectando o bot ao canal…"
+        if request != nil {
+            discordGuilds = (try? await discordBotClient.listGuilds()) ?? discordGuilds
+            discordChannels = (try? await discordBotClient.listChannels(guildId: guildID)) ?? []
+            selectedDiscordGuildID = guildID
+            selectedDiscordChannelID = channelID
+        }
         let createdAt = Date()
         let folder = uniqueDiscordFolder(for: createdAt)
         do {
             try settings.ensureOutputFolder()
-            try await discordBotClient.start(guildId: guildID, channelId: channelID, folder: folder)
+            try await discordBotClient.start(
+                guildId: guildID,
+                channelId: channelID,
+                folder: folder,
+                requestId: request?.requestId
+            )
             activeFolder = folder
             activeCreatedAt = createdAt
             activeDiscordRecording = true
@@ -779,6 +811,12 @@ final class AppModel: ObservableObject {
             phase = .recording
             statusDetail = "Gravando o canal do Discord."
         } catch {
+            if let request {
+                await discordBotClient.rejectStart(
+                    requestId: request.requestId,
+                    message: "Não foi possível iniciar a gravação. Verifique o PontoGrava no Mac."
+                )
+            }
             try? FileManager.default.removeItem(at: folder)
             discordAudioLevel = 0
             fail(error)
@@ -820,6 +858,8 @@ final class AppModel: ObservableObject {
 
     private func handleDiscordEvent(_ event: DiscordBotEvent) {
         switch event {
+        case let .startRequested(request):
+            Task { await beginDiscordRecording(request: request) }
         case let .participant(name):
             if !discordParticipants.contains(name) {
                 discordParticipants.append(name)

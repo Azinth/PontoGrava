@@ -89,6 +89,15 @@ export function recordingCommandError(recording, guildId, channelId) {
   return null;
 }
 
+export function startRecordingCommandError(recording, pending, channelId, memberVoiceChannelId) {
+  if (recording) return 'Já existe uma gravação do Discord em andamento.';
+  if (pending) return 'Outra gravação do Discord já está sendo iniciada.';
+  if (!channelId || channelId !== memberVoiceChannelId) {
+    return 'Use /start no chat do canal de voz em que você está.';
+  }
+  return null;
+}
+
 function run(executable, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, { stdio: ['ignore', 'ignore', 'pipe'] });
