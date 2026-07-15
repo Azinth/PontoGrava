@@ -26,8 +26,17 @@ enum DiscordIntegrationCheck {
         """
         try Data(json.utf8).write(to: hidden.appendingPathComponent("manifest.json"))
         let manifest = try DiscordManifest.load(from: root)
+        let request = try JSONDecoder().decode(
+            DiscordStartRequest.self,
+            from: Data(#"{"requestId":"request","guildId":"guild","channelId":"channel"}"#.utf8)
+        )
         guard manifest.channelName == "Geral",
-              manifest.participants.first?.displayName == "Ana" else {
+              manifest.participants.first?.displayName == "Ana",
+              request == DiscordStartRequest(
+                requestId: "request",
+                guildId: "guild",
+                channelId: "channel"
+              ) else {
             throw CheckError.failed
         }
         print("Discord integration checks passed")
