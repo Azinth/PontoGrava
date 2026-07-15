@@ -25,13 +25,15 @@ enum TranscriptFormatter {
         createdAt: Date,
         audioFilename: String,
         source: TranscriptSource,
-        detectedLanguage: String?
+        detectedLanguage: String?,
+        processing: String = "Local"
     ) -> String {
         var lines = [
-            "TRANSCRIÇÃO LOCAL",
+            "TRANSCRIÇÃO",
             "Data: \(MeetingNaming.titleFormatter.string(from: createdAt))",
             "Arquivo: \(audioFilename)",
             "Fonte: \(source.rawValue)",
+            "Processamento: \(processing)",
             "Idioma: \(detectedLanguage ?? "automático")",
             String(repeating: "-", count: 48),
             ""

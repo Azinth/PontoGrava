@@ -4,6 +4,7 @@ private let onboardingAccent = Color(red: 0.79, green: 0.35, blue: 0.21)
 
 struct OnboardingView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
         HStack(spacing: 0) {
@@ -16,7 +17,7 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("PontoGrava")
                         .font(.system(.largeTitle, design: .serif, weight: .semibold))
-                    Text("Grave, transcreva e revise reuniões sem enviar o áudio para outro serviço.")
+                    Text("Grave, transcreva e revise reuniões com processamento local por padrão.")
                         .font(.title3)
                         .foregroundStyle(.secondary)
                 }
@@ -24,9 +25,9 @@ struct OnboardingView: View {
                 Spacer()
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Processamento local", systemImage: "lock.shield.fill")
+                    Label("Processamento sob seu controle", systemImage: "lock.shield.fill")
                         .font(.headline)
-                    Text("O Whisper roda neste Mac. Somente o download inicial do modelo precisa de internet.")
+                    Text("O Whisper roda neste Mac. Se preferir, você poderá configurar a OpenAI depois nos Ajustes.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -101,6 +102,7 @@ struct OnboardingView: View {
             .padding(30)
         }
         .frame(width: 820, height: 560)
+        .preferredColorScheme(settings.appearance.colorScheme)
         .onAppear { model.refreshMicrophones() }
     }
 }

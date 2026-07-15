@@ -17,6 +17,7 @@ export DEVELOPER_DIR="/Library/Developer/CommandLineTools"
 /usr/bin/xcrun swiftc \
   -parse-as-library \
   "$ROOT/Sources/MeetingScribe/Models.swift" \
+  "$ROOT/Sources/MeetingScribe/CredentialStore.swift" \
   "$ROOT/Sources/MeetingScribe/DiscordIntegration.swift" \
   "$ROOT/Sources/MeetingScribe/AppSettings.swift" \
   "$ROOT/Sources/MeetingScribe/SummarySupport.swift" \
@@ -28,12 +29,28 @@ export DEVELOPER_DIR="/Library/Developer/CommandLineTools"
 
 /usr/bin/xcrun swiftc \
   -parse-as-library \
+  "$ROOT/Sources/MeetingScribe/CredentialStore.swift" \
   "$ROOT/Sources/MeetingScribe/DiscordIntegration.swift" \
   "$ROOT/Tests/DiscordIntegrationCheck.swift" \
   -framework Security \
   -o "$ROOT/work/tests/DiscordIntegrationCheck"
 
 "$ROOT/work/tests/DiscordIntegrationCheck"
+
+/usr/bin/xcrun swiftc \
+  -parse-as-library \
+  "$ROOT/Sources/MeetingScribe/Models.swift" \
+  "$ROOT/Sources/MeetingScribe/SummarySupport.swift" \
+  "$ROOT/Sources/MeetingScribe/AudioProcessing.swift" \
+  "$ROOT/Sources/MeetingScribe/CredentialStore.swift" \
+  "$ROOT/Sources/MeetingScribe/OpenAIService.swift" \
+  "$ROOT/Tests/OpenAIIntegrationCheck.swift" \
+  -framework AVFoundation \
+  -framework CoreMedia \
+  -framework Security \
+  -o "$ROOT/work/tests/OpenAIIntegrationCheck"
+
+"$ROOT/work/tests/OpenAIIntegrationCheck"
 
 /usr/bin/xcrun swiftc \
   -parse-as-library \

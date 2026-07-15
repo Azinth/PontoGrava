@@ -5,6 +5,7 @@ private let brandAccent = Color(red: 0.79, green: 0.35, blue: 0.21)
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
         NavigationSplitView {
@@ -15,6 +16,7 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .tint(brandAccent)
+        .preferredColorScheme(settings.appearance.colorScheme)
         .frame(minWidth: 760, minHeight: 560)
         .sheet(item: renameRequest) { record in
             RenameMeetingView(record: record)
@@ -252,7 +254,6 @@ private struct MeetingRow: View {
 
 private struct SidebarSettings: View {
     @EnvironmentObject private var model: AppModel
-    @State private var showingSummaryPromptEditor = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -296,48 +297,39 @@ private struct SidebarSettings: View {
             .disabled(model.isBusy || model.summaryUnavailableMessage != nil)
             .help("Gera resumo.md após uma nova transcrição sem substituir resumos existentes.")
 
-            Button {
-                showingSummaryPromptEditor = true
-            } label: {
-                Label(
-                    model.settings.activeCustomSummaryPrompt == nil ? "Prompt padrão" : "Prompt personalizado",
-                    systemImage: "text.badge.gearshape"
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.borderless)
-            .font(.caption)
-            .disabled(model.isBusy)
-            .help("Personalizar como os resumos são gerados")
-            .sheet(isPresented: $showingSummaryPromptEditor) {
-                SummaryPromptSettingsView()
-                    .environmentObject(model)
-            }
-
             if let message = model.summaryUnavailableMessage {
                 Text(message)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 8) {
-                SidebarNotificationControl()
+            SidebarNotificationControl()
+
+            HStack(spacing: 12) {
+                Text(appVersion)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
                 Spacer()
-                Button {
-                    model.chooseOutputFolder()
-                } label: {
-                    Image(systemName: "gearshape")
+                SettingsLink {
+                    Label("Ajustes", systemImage: "gearshape")
                 }
                 .buttonStyle(.borderless)
-                .help("Alterar pasta de destino")
-                .disabled(model.isBusy)
+                .help("Abrir Ajustes")
             }
         }
         .padding(14)
     }
+
+    private var appVersion: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        guard let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String else {
+            return "Versão \(version)"
+        }
+        return "Versão \(version) (\(build))"
+    }
 }
 
-private struct SummaryPromptSettingsView: View {
+struct SummaryPromptSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var model: AppModel
 
@@ -1246,7 +1238,6 @@ private struct MeetingDetailView: View {
                     .disabled(
                         model.isBusy
                             || record.transcriptURL == nil
-                            || model.summaryUnavailableMessage != nil
                     )
 
                     Spacer()
@@ -1284,7 +1275,6 @@ private struct MeetingDetailView: View {
             .disabled(
                 model.isBusy
                     || record.transcriptURL == nil
-                    || model.summaryUnavailableMessage != nil
             )
             Divider()
             Button("Mover para a Lixeira", role: .destructive) {
@@ -1413,7 +1403,6 @@ private struct SummaryPreviewView: View {
                     .disabled(
                         model.isBusy
                             || record.transcriptURL == nil
-                            || model.summaryUnavailableMessage != nil
                     )
                 }
             }

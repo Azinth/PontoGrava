@@ -79,8 +79,8 @@ enum AppPhase: Equatable {
         case .recording: "Gravando"
         case .paused: "Gravação pausada"
         case .finalizing: "Finalizando o WAV"
-        case .transcribing: "Transcrevendo localmente"
-        case .summarizing: "Gerando resumo local"
+        case .transcribing: "Transcrevendo"
+        case .summarizing: "Gerando resumo"
         }
     }
 }

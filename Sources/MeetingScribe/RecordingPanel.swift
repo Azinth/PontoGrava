@@ -48,7 +48,9 @@ final class RecordingPanelController: NSObject, NSWindowDelegate {
         panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.delegate = self
         panel.contentViewController = NSHostingController(
-            rootView: RecordingPanelView().environmentObject(model)
+            rootView: RecordingPanelView()
+                .environmentObject(model)
+                .environmentObject(model.settings)
         )
         return panel
     }
@@ -68,6 +70,7 @@ final class RecordingPanelController: NSObject, NSWindowDelegate {
 
 struct RecordingPanelView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var settings: AppSettings
 
     private var combinedLevel: Float {
         max(model.systemAudioLevel, model.microphoneAudioLevel)
@@ -145,6 +148,7 @@ struct RecordingPanelView: View {
         .frame(width: 450, height: 270)
         .background(.regularMaterial)
         .tint(panelAccent)
+        .preferredColorScheme(settings.appearance.colorScheme)
     }
 }
 

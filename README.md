@@ -6,13 +6,15 @@
 
 Aplicativo para macOS que grava reuniões no Mac ou em canais de voz do Discord e
 gera `audio.wav` mais uma transcrição editável. A captura, o processamento e o
-Whisper executam localmente no computador.
+Whisper executam localmente por padrão; a OpenAI pode ser configurada como
+provedor opcional de transcrição e resumos.
 
 - Captura simultânea do áudio do sistema e do microfone.
 - Gravação de canais do Discord com identificação dos participantes.
 - Soundwave e cronômetro em tempo real.
-- Transcrição local com WhisperKit e seleção de idioma.
-- Resumo local editável com trabalho realizado, decisões e pendências.
+- Transcrição com WhisperKit local ou OpenAI e seleção de idioma.
+- Resumo editável com Apple Intelligence local ou OpenAI.
+- Aparência automática, clara ou escura.
 - Histórico com reprodução, edição, retranscrição e acesso pelo Finder.
 - Importação de arquivos de áudio já existentes.
 
@@ -47,6 +49,7 @@ pausar, continuar ou parar.
 - macOS 15 ou mais recente.
 - Internet no primeiro uso para baixar o modelo Whisper.
 - Para gerar resumos: macOS 26.1 ou mais recente com Apple Intelligence ativado.
+- Para usar a OpenAI: internet, chave de API e saldo ou cota disponível na conta.
 - Para gravar o Discord: Node.js 22.12 ou mais recente e FFmpeg.
 
 Swift e Xcode **não são necessários** para instalar a versão pronta.
@@ -88,20 +91,41 @@ O app combina sistema e microfone no mesmo WAV. As pausas são removidas do
 ## Gerar resumos com IA
 
 Depois da transcrição, abra a aba **Resumo** e clique em **Gerar resumo**. O
-PontoGrava usa a versão editada de `transcricao.txt` e o modelo local do Apple
-Intelligence para criar um `resumo.md` também editável. Português do Brasil
-(`pt_BR`) e inglês (`en_US`) são selecionados conforme o idioma da transcrição.
+PontoGrava usa a versão editada de `transcricao.txt` e o provedor escolhido para
+criar um `resumo.md` também editável. Português do Brasil (`pt_BR`) e inglês
+(`en_US`) são selecionados conforme o idioma da transcrição.
 
 Por padrão, o resumo registra **O que foi feito** por cada participante, **O que
 foi definido** na reunião e **O que está pendente**, sem inventar decisões,
-responsáveis ou prazos. Em **Prompt padrão**, você pode ativar e salvar
-instruções próprias para escolher outro formato ou foco; a transcrição e o
-idioma são adicionados automaticamente ao prompt.
+responsáveis ou prazos. Em **Ajustes → Inteligência Artificial → Resumo**, você
+pode ativar e salvar instruções próprias para escolher outro formato ou foco; a
+transcrição e o idioma são adicionados automaticamente ao prompt.
 
 A geração automática fica desativada por padrão e pode ser ativada nas
 configurações. Ela roda após uma transcrição bem-sucedida e nunca substitui um
-resumo existente. Para usar o recurso, o Mac precisa executar macOS 26.1 ou
-mais recente com o Apple Intelligence ativado e o modelo disponível.
+resumo existente. O provedor local exige macOS 26.1 ou mais recente com o Apple
+Intelligence ativado; a OpenAI pode ser usada nos sistemas suportados pelo app.
+
+## Ajustar aparência e provedores de IA
+
+Abra **PontoGrava → Ajustes** ou pressione `⌘,`:
+
+- Em **Geral**, escolha **Sistema**, **Claro** ou **Escuro**. A opção Sistema
+  acompanha automaticamente a aparência do macOS. A pasta de destino das
+  gravações também pode ser alterada nessa seção.
+- Em **Inteligência Artificial**, escolha separadamente o provedor da
+  transcrição e do resumo e clique em **Salvar configurações**.
+- Para usar a OpenAI, cole uma chave de API e clique em **Salvar chave** antes
+  de aplicar o provedor. A chave fica no Chaves do macOS e não é gravada nas
+  pastas das reuniões.
+
+O provedor local continua sendo o padrão. Ao selecionar OpenAI para transcrição,
+o app envia trechos temporários do áudio para a API. Ao selecionar OpenAI para
+resumos, envia o texto da transcrição. O app não alterna silenciosamente entre
+os provedores quando uma operação falha.
+
+A versão instalada aparece no rodapé da barra lateral, junto ao acesso aos
+Ajustes.
 
 ## Gravar um canal do Discord
 
@@ -137,7 +161,7 @@ canais ou enquanto o app está ocupado são recusados de forma privada. O app
 precisa permanecer aberto e conectado ao Discord no Mac para responder aos
 comandos.
 
-O Whisper transcreve o `audio.wav` combinado uma única vez. As faixas individuais
+O provedor escolhido transcreve o `audio.wav` combinado. As faixas individuais
 alinhadas são usadas somente para associar cada trecho ao participante registrado
 no manifesto do Discord.
 
@@ -156,10 +180,10 @@ Gravações do Discord também mantêm faixas individuais e um manifesto dentro 
 subpasta oculta `.discord/`. Isso permite refazer a transcrição preservando os
 nomes dos participantes.
 
-- Áudio e transcrição não são enviados para servidores do PontoGrava.
-- O resumo usa o modelo local do Apple Intelligence e também não é enviado para servidores.
-- O modelo Whisper é baixado no primeiro uso e depois executado localmente.
-- O token do Discord é armazenado no **Chaves do macOS**, nunca nas pastas das reuniões.
+- O modo local não envia áudio nem transcrição para provedores de IA externos.
+- Quando OpenAI é selecionada, o áudio ou a transcrição correspondente é enviado diretamente para a API da OpenAI.
+- O modelo WhisperKit é baixado no primeiro uso e depois executado localmente.
+- As chaves da OpenAI e do Discord são armazenadas no **Chaves do macOS**, nunca nas pastas das reuniões.
 - O repositório ignora gravações, transcrições, históricos e arquivos temporários.
 
 O modo Discord naturalmente se conecta aos serviços do Discord durante a
@@ -200,6 +224,13 @@ transcrições seguintes reutilizam o modelo local e tendem a iniciar mais rápi
 Confirme que o Mac usa macOS 26.1 ou mais recente e que o Apple Intelligence
 está ativado e terminou de baixar o modelo. O PontoGrava também verifica se o
 idioma da transcrição é compatível antes de gerar o resumo.
+
+### A OpenAI recusou a transcrição ou o resumo
+
+- Confira a chave em **PontoGrava → Ajustes → Inteligência Artificial**.
+- Confirme que a conta da API possui saldo ou cota disponível.
+- Verifique a conexão com a internet e tente novamente. O áudio ou a transcrição
+  local permanece preservado quando a chamada falha.
 
 Se o problema continuar, abra uma [issue](https://github.com/Azinth/PontoGrava/issues)
 informando a versão do macOS, o modelo do Mac e a mensagem exibida pelo app. Não

@@ -4,6 +4,7 @@ private let menuAccent = Color(red: 0.79, green: 0.35, blue: 0.21)
 
 struct MenuBarView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var settings: AppSettings
     @Environment(\.openWindow) private var openWindow
 
     private var combinedLevel: Float {
@@ -75,6 +76,7 @@ struct MenuBarView: View {
         .padding(16)
         .frame(width: 360)
         .tint(menuAccent)
+        .preferredColorScheme(settings.appearance.colorScheme)
     }
 
     private var recordingMonitor: some View {
