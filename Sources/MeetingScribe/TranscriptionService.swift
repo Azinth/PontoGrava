@@ -18,11 +18,15 @@ actor TranscriptionService {
         audioURL: URL,
         language: TranscriptionLanguage,
         createdAt: Date,
+        provider: AIProvider,
+        apiKey: String?,
         progress: @escaping @Sendable (Double, String) -> Void
     ) async throws -> URL {
         let result = try await transcribeSegments(
             audioURL: audioURL,
             language: language,
+            provider: provider,
+            apiKey: apiKey,
             progress: progress
         )
         return try writeTranscript(
@@ -31,6 +35,7 @@ actor TranscriptionService {
             audioURL: audioURL,
             createdAt: createdAt,
             source: .local,
+            provider: provider,
             progress: progress
         )
     }
@@ -41,11 +46,15 @@ actor TranscriptionService {
         audioURL: URL,
         language: TranscriptionLanguage,
         createdAt: Date,
+        provider: AIProvider,
+        apiKey: String?,
         progress: @escaping @Sendable (Double, String) -> Void
     ) async throws -> URL {
         let result = try await transcribeSegments(
             audioURL: audioURL,
             language: language,
+            provider: provider,
+            apiKey: apiKey,
             progress: progress
         )
         progress(0.9, "Identificando participantes…")
@@ -62,11 +71,37 @@ actor TranscriptionService {
             audioURL: audioURL,
             createdAt: createdAt,
             source: .discord,
+            provider: provider,
             progress: progress
         )
     }
 
     private func transcribeSegments(
+        audioURL: URL,
+        language: TranscriptionLanguage,
+        provider: AIProvider,
+        apiKey: String?,
+        progress: @escaping @Sendable (Double, String) -> Void
+    ) async throws -> (segments: [TranscriptSegment], detectedLanguage: String?) {
+        switch provider {
+        case .local:
+            return try await transcribeLocalSegments(
+                audioURL: audioURL,
+                language: language,
+                progress: progress
+            )
+        case .openAI:
+            guard let apiKey, !apiKey.isEmpty else { throw OpenAIError.missingAPIKey }
+            return try await transcribeOpenAISegments(
+                audioURL: audioURL,
+                language: language,
+                apiKey: apiKey,
+                progress: progress
+            )
+        }
+    }
+
+    private func transcribeLocalSegments(
         audioURL: URL,
         language: TranscriptionLanguage,
         progress: @escaping @Sendable (Double, String) -> Void
@@ -128,12 +163,60 @@ actor TranscriptionService {
         return (segments, results.first?.language)
     }
 
+    private func transcribeOpenAISegments(
+        audioURL: URL,
+        language: TranscriptionLanguage,
+        apiKey: String,
+        progress: @escaping @Sendable (Double, String) -> Void
+    ) async throws -> (segments: [TranscriptSegment], detectedLanguage: String?) {
+        progress(0.05, "Preparando o áudio para envio…")
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pontograva-openai-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let chunks = try OpenAIAudioChunker.makeChunks(
+            audioURL: audioURL,
+            directory: temporaryDirectory
+        )
+        guard !chunks.isEmpty else { throw AppError.transcriptionReturnedNoText }
+
+        let client = OpenAIClient(apiKey: apiKey)
+        var detectedLanguage: String?
+        var timedSegments: [TimedTranscriptSegment] = []
+        for (index, chunk) in chunks.enumerated() {
+            progress(
+                0.15 + (Double(index) / Double(chunks.count)) * 0.7,
+                chunks.count == 1
+                    ? "Enviando áudio para transcrição…"
+                    : "Transcrevendo trecho \(index + 1) de \(chunks.count)…"
+            )
+            let result = try await client.transcribe(
+                fileURL: chunk.url,
+                language: language.whisperCode
+            )
+            if detectedLanguage == nil { detectedLanguage = result.language }
+            timedSegments.append(contentsOf: result.segments.map {
+                TimedTranscriptSegment(
+                    start: chunk.startTime + $0.start,
+                    end: chunk.startTime + $0.end,
+                    text: $0.text
+                )
+            })
+        }
+
+        let segments = deduplicated(timedSegments)
+            .map { TranscriptSegment(start: $0.start, end: $0.end, text: $0.text) }
+        guard !segments.isEmpty else { throw AppError.transcriptionReturnedNoText }
+        return (segments, detectedLanguage)
+    }
+
     private func writeTranscript(
         segments: [TranscriptSegment],
         detectedLanguage: String?,
         audioURL: URL,
         createdAt: Date,
         source: TranscriptSource,
+        provider: AIProvider,
         progress: @escaping @Sendable (Double, String) -> Void
     ) throws -> URL {
         progress(0.92, "Salvando a transcrição…")
@@ -142,7 +225,8 @@ actor TranscriptionService {
             createdAt: createdAt,
             audioFilename: audioURL.lastPathComponent,
             source: source,
-            detectedLanguage: detectedLanguage
+            detectedLanguage: detectedLanguage,
+            processing: provider.title
         )
         let transcriptURL = audioURL.deletingLastPathComponent()
             .appendingPathComponent("transcricao.txt")

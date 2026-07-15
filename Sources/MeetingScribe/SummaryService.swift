@@ -70,6 +70,8 @@ actor SummaryService {
         folderURL: URL,
         overwrite: Bool,
         customPrompt: String?,
+        provider: AIProvider,
+        apiKey: String?,
         progress: @escaping @Sendable (Double, String) -> Void
     ) async throws -> URL {
         let summaryURL = folderURL.appendingPathComponent("resumo.md")
@@ -83,18 +85,31 @@ actor SummaryService {
         let transcript = try String(contentsOf: transcriptURL, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !transcript.isEmpty else { throw SummaryError.emptyTranscript }
-        guard #available(macOS 26.0, *) else { throw SummaryError.unsupportedOS }
-
-        progress(0.05, "Verificando o modelo local…")
         let prompt = customPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let prompt, prompt.count > SummaryPrompt.maximumCustomPromptCharacters {
             throw SummaryError.customPromptTooLong
         }
-        let markdown = try await generateAvailable(
-            transcript: transcript,
-            customPrompt: prompt?.isEmpty == false ? prompt : nil,
-            progress: progress
-        )
+        let activePrompt = prompt?.isEmpty == false ? prompt : nil
+        let markdown: String
+        switch provider {
+        case .local:
+            guard #available(macOS 26.0, *) else { throw SummaryError.unsupportedOS }
+            progress(0.05, "Verificando o modelo local…")
+            markdown = try await generateAvailable(
+                transcript: transcript,
+                customPrompt: activePrompt,
+                progress: progress
+            )
+        case .openAI:
+            guard let apiKey, !apiKey.isEmpty else { throw OpenAIError.missingAPIKey }
+            progress(0.05, "Conectando à OpenAI…")
+            markdown = try await generateOpenAI(
+                transcript: transcript,
+                customPrompt: activePrompt,
+                apiKey: apiKey,
+                progress: progress
+            )
+        }
         try markdown.write(to: summaryURL, atomically: true, encoding: .utf8)
         progress(1, "Resumo concluído")
         return summaryURL
@@ -139,6 +154,127 @@ actor SummaryService {
             progress: progress
         )
         return SummaryFormatter.markdown(summary, language: language)
+    }
+
+    private func generateOpenAI(
+        transcript: String,
+        customPrompt: String?,
+        apiKey: String,
+        progress: @escaping @Sendable (Double, String) -> Void
+    ) async throws -> String {
+        let language = SummaryLanguage.detect(in: transcript)
+        let chunks = TranscriptChunker.chunks(transcript, maxCharacters: 40_000)
+        let client = OpenAIClient(apiKey: apiKey)
+        if let customPrompt {
+            return try await generateOpenAICustom(
+                chunks: chunks,
+                customPrompt: customPrompt,
+                language: language,
+                client: client,
+                progress: progress
+            )
+        }
+        let summary = try await generateOpenAIDefault(
+            chunks: chunks,
+            language: language,
+            client: client,
+            progress: progress
+        )
+        return SummaryFormatter.markdown(summary, language: language)
+    }
+
+    private func generateOpenAIDefault(
+        chunks: [String],
+        language: SummaryLanguage,
+        client: OpenAIClient,
+        progress: @escaping @Sendable (Double, String) -> Void
+    ) async throws -> MeetingSummary {
+        progress(0.12, chunks.count == 1 ? "Gerando o resumo…" : "Resumindo \(chunks.count) trechos…")
+        var summaries: [MeetingSummary] = []
+        for (index, chunk) in chunks.enumerated() {
+            summaries.append(try await client.meetingSummary(
+                instructions: language.instructions,
+                prompt: SummaryPrompt.transcriptSection(chunk),
+                maximumOutputTokens: chunks.count == 1 ? 1_000 : 600
+            ))
+            let fraction = Double(index + 1) / Double(chunks.count)
+            progress(0.12 + fraction * 0.58, "Resumindo trecho \(index + 1) de \(chunks.count)…")
+        }
+
+        while summaries.count > 1 {
+            let combined = summaries
+                .map(SummaryFormatter.consolidationText)
+                .joined(separator: "\n---\n")
+            let batches = TranscriptChunker.chunks(combined, maxCharacters: 40_000)
+            if batches.count == 1 {
+                progress(0.82, "Consolidando o resumo…")
+                return try await client.meetingSummary(
+                    instructions: language.instructions,
+                    prompt: SummaryPrompt.consolidation(combined),
+                    maximumOutputTokens: 1_000
+                )
+            }
+
+            var consolidated: [MeetingSummary] = []
+            for batch in batches {
+                consolidated.append(try await client.meetingSummary(
+                    instructions: language.instructions,
+                    prompt: SummaryPrompt.consolidation(batch),
+                    maximumOutputTokens: 600
+                ))
+            }
+            summaries = consolidated
+        }
+        guard let summary = summaries.first else { throw SummaryError.emptyResponse }
+        return summary
+    }
+
+    private func generateOpenAICustom(
+        chunks: [String],
+        customPrompt: String,
+        language: SummaryLanguage,
+        client: OpenAIClient,
+        progress: @escaping @Sendable (Double, String) -> Void
+    ) async throws -> String {
+        let instructions = language.customInstructions(customPrompt)
+        progress(0.12, chunks.count == 1 ? "Gerando o resumo personalizado…" : "Resumindo \(chunks.count) trechos…")
+        var summaries: [String] = []
+        for (index, chunk) in chunks.enumerated() {
+            summaries.append(try await client.text(
+                instructions: instructions,
+                prompt: SummaryPrompt.customTranscriptSection(chunk),
+                maximumOutputTokens: chunks.count == 1 ? 1_200 : 700
+            ))
+            let fraction = Double(index + 1) / Double(chunks.count)
+            progress(0.12 + fraction * 0.58, "Resumindo trecho \(index + 1) de \(chunks.count)…")
+        }
+
+        while summaries.count > 1 {
+            let combined = summaries.joined(separator: "\n\n---\n\n")
+            let batches = TranscriptChunker.chunks(combined, maxCharacters: 40_000)
+            if batches.count == 1 {
+                progress(0.82, "Consolidando o resumo personalizado…")
+                return SummaryFormatter.customMarkdown(try await client.text(
+                    instructions: instructions,
+                    prompt: SummaryPrompt.customConsolidation(combined),
+                    maximumOutputTokens: 1_200
+                ))
+            }
+
+            var consolidated: [String] = []
+            for batch in batches {
+                consolidated.append(try await client.text(
+                    instructions: instructions,
+                    prompt: SummaryPrompt.customConsolidation(batch),
+                    maximumOutputTokens: 700
+                ))
+            }
+            summaries = consolidated
+        }
+        guard let summary = summaries.first else { throw SummaryError.emptyResponse }
+        let markdown = SummaryFormatter.customMarkdown(summary)
+        guard !markdown.isEmpty else { throw SummaryError.emptyResponse }
+        return markdown
     }
 
     @available(macOS 26.0, *)

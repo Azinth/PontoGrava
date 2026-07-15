@@ -8,6 +8,7 @@ struct PontoGravaApp: App {
         WindowGroup(id: "main") {
             ContentView()
                 .environmentObject(model)
+                .environmentObject(model.settings)
                 .task { await model.initialize() }
                 .onOpenURL { model.handleDeepLink($0) }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -16,6 +17,7 @@ struct PontoGravaApp: App {
                 .sheet(isPresented: $model.showOnboarding) {
                     OnboardingView()
                         .environmentObject(model)
+                        .environmentObject(model.settings)
                         .interactiveDismissDisabled()
                 }
                 .alert("Atenção", isPresented: warningPresented) {
@@ -50,8 +52,15 @@ struct PontoGravaApp: App {
         ) {
             MenuBarView()
                 .environmentObject(model)
+                .environmentObject(model.settings)
         }
         .menuBarExtraStyle(.window)
+
+        Settings {
+            AppSettingsView()
+                .environmentObject(model)
+                .environmentObject(model.settings)
+        }
     }
 
     private var warningPresented: Binding<Bool> {

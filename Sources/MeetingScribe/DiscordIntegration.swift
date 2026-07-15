@@ -94,41 +94,25 @@ enum DiscordIntegrationError: LocalizedError {
 }
 
 enum DiscordTokenStore {
-    private static let service = "local.gabriel.pontograva.discord"
-    private static let account = "bot-token"
+    private static let store = KeychainCredentialStore(
+        service: "local.gabriel.pontograva.discord",
+        account: "bot-token"
+    )
 
     static func load() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        store.load()
     }
 
     static func save(_ token: String) throws {
-        delete()
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: Data(token.utf8)
-        ]
-        let status = SecItemAdd(query as CFDictionary, nil)
-        guard status == errSecSuccess else { throw DiscordIntegrationError.keychain(status) }
+        do {
+            try store.save(token)
+        } catch let KeychainCredentialError.status(status) {
+            throw DiscordIntegrationError.keychain(status)
+        }
     }
 
     static func delete() {
-        SecItemDelete([
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ] as CFDictionary)
+        store.delete()
     }
 }
 

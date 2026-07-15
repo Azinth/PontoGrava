@@ -19,6 +19,7 @@ enum SmokeChecks {
         )
         check(text.contains("Arquivo: audio.wav"), "audio filename")
         check(text.contains("Fonte: Local"), "local source")
+        check(text.contains("Processamento: Local"), "local processing provider")
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         let named = TranscriptFormatter.format(
             segments: [TranscriptSegment(start: 4, text: "Olá", speaker: "Ana")],

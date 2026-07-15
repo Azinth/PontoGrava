@@ -109,6 +109,9 @@ enum SummaryChecks {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
+        check(settings.appearance == .system, "appearance defaults to system")
+        check(settings.transcriptionProvider == .local, "transcription defaults local")
+        check(settings.summaryProvider == .local, "summary defaults local")
         check(!settings.automaticallyGenerateSummary, "automatic summary defaults off")
         check(!settings.usesCustomSummaryPrompt, "custom prompt defaults off")
         check(settings.customSummaryPrompt.isEmpty, "custom prompt defaults empty")
@@ -116,11 +119,33 @@ enum SummaryChecks {
         settings.automaticallyGenerateSummary = true
         settings.usesCustomSummaryPrompt = true
         settings.customSummaryPrompt = "Liste riscos e bloqueios."
+
+        settings.appearance = .light
+        check(AppSettings(defaults: defaults).appearance == .light, "light appearance persists")
+        settings.appearance = .dark
+        check(AppSettings(defaults: defaults).appearance == .dark, "dark appearance persists")
+        settings.appearance = .system
+        check(AppSettings(defaults: defaults).appearance == .system, "system appearance persists")
+
+        settings.transcriptionProvider = .openAI
+        settings.summaryProvider = .local
+        var restoredProviders = AppSettings(defaults: defaults)
+        check(restoredProviders.transcriptionProvider == .openAI, "transcription provider persists independently")
+        check(restoredProviders.summaryProvider == .local, "local summary provider persists independently")
+        settings.transcriptionProvider = .local
+        settings.summaryProvider = .openAI
+        restoredProviders = AppSettings(defaults: defaults)
+        check(restoredProviders.transcriptionProvider == .local, "local transcription provider persists independently")
+        check(restoredProviders.summaryProvider == .openAI, "summary provider persists independently")
+
         check(
             AppSettings(defaults: defaults).automaticallyGenerateSummary,
             "automatic summary setting persists"
         )
         let restoredSettings = AppSettings(defaults: defaults)
+        check(restoredSettings.appearance == .system, "appearance setting persists")
+        check(restoredSettings.transcriptionProvider == .local, "transcription provider persists")
+        check(restoredSettings.summaryProvider == .openAI, "summary provider persists")
         check(restoredSettings.usesCustomSummaryPrompt, "custom prompt toggle persists")
         check(
             restoredSettings.customSummaryPrompt == "Liste riscos e bloqueios.",

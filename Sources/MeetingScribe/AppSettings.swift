@@ -1,7 +1,43 @@
 import Foundation
 
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: "Sistema"
+        case .light: "Claro"
+        case .dark: "Escuro"
+        }
+    }
+}
+
+enum AIProvider: String, CaseIterable, Identifiable {
+    case local
+    case openAI = "openai"
+
+    var id: String { rawValue }
+    var title: String { self == .local ? "Local" : "OpenAI" }
+}
+
 @MainActor
 final class AppSettings: ObservableObject {
+    @Published var appearance: AppAppearance {
+        didSet { defaults.set(appearance.rawValue, forKey: Keys.appearance) }
+    }
+
+    @Published var transcriptionProvider: AIProvider {
+        didSet { defaults.set(transcriptionProvider.rawValue, forKey: Keys.transcriptionProvider) }
+    }
+
+    @Published var summaryProvider: AIProvider {
+        didSet { defaults.set(summaryProvider.rawValue, forKey: Keys.summaryProvider) }
+    }
+
     @Published var outputFolderPath: String {
         didSet { defaults.set(outputFolderPath, forKey: Keys.outputFolderPath) }
     }
@@ -50,6 +86,15 @@ final class AppSettings: ObservableObject {
         let defaultOutput = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("PontoGrava", isDirectory: true)
             .path
+        appearance = AppAppearance(
+            rawValue: defaults.string(forKey: Keys.appearance) ?? "system"
+        ) ?? .system
+        transcriptionProvider = AIProvider(
+            rawValue: defaults.string(forKey: Keys.transcriptionProvider) ?? "local"
+        ) ?? .local
+        summaryProvider = AIProvider(
+            rawValue: defaults.string(forKey: Keys.summaryProvider) ?? "local"
+        ) ?? .local
         outputFolderPath = defaults.string(forKey: Keys.outputFolderPath) ?? defaultOutput
         language = TranscriptionLanguage(
             rawValue: defaults.string(forKey: Keys.language) ?? "automatic"
@@ -84,6 +129,9 @@ final class AppSettings: ObservableObject {
     }
 
     private enum Keys {
+        static let appearance = "appAppearance"
+        static let transcriptionProvider = "transcriptionProvider"
+        static let summaryProvider = "summaryProvider"
         static let outputFolderPath = "outputFolderPath"
         static let language = "transcriptionLanguage"
         static let recordingMode = "recordingMode"

@@ -41,6 +41,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var discordAudioLevel: Float = 0
     @Published var discordTokenDraft = ""
     @Published private(set) var discordHasToken: Bool
+    @Published var openAITokenDraft = ""
+    @Published private(set) var openAIHasToken: Bool
+    @Published var openAISettingsMessage: String?
     @Published private(set) var discordConnected = false
     @Published private(set) var discordConnectionDetail = "Configure o bot para listar os canais."
     @Published private(set) var discordApplicationID: String?
@@ -77,7 +80,8 @@ final class AppModel: ObservableObject {
         self.playbackController = playbackController ?? AudioPlaybackController()
         self.notificationService = notificationService ?? NotificationService()
         self.meetingFileService = meetingFileService ?? MeetingFileService()
-        discordHasToken = DiscordTokenStore.load() != nil
+        discordHasToken = false
+        openAIHasToken = false
         discordRecoveryRequest = nil
         showOnboarding = !settings.hasCompletedOnboarding
 
@@ -103,7 +107,12 @@ final class AppModel: ObservableObject {
     var isDiscordRecording: Bool { isRecordingSession && activeDiscordRecording }
     var canPauseRecording: Bool { isRecordingSession && !activeDiscordRecording }
     var recordingStartedAt: Date? { recordingTimeline.startedAt }
-    var summaryUnavailableMessage: String? { SummaryService.unavailabilityMessage }
+    var summaryUnavailableMessage: String? {
+        switch settings.summaryProvider {
+        case .local: SummaryService.unavailabilityMessage
+        case .openAI: openAIHasToken ? nil : OpenAIError.missingAPIKey.localizedDescription
+        }
+    }
 
     var canBeginRecording: Bool {
         guard phase == .idle else { return false }
@@ -147,12 +156,30 @@ final class AppModel: ObservableObject {
         refreshMicrophones()
         detectDiscordRecoverySession()
         restoreSummaryPaths()
-        if discordHasToken { await connectDiscord() }
         if selectedRecordID == nil { selectedRecordID = records.first?.id }
+        loadCredentialState()
         await refreshNotificationPermission()
         showNotificationInvitation = settings.hasCompletedOnboarding
             && !settings.hasSeenNotificationInvitation
             && notificationPermissionState == .notDetermined
+    }
+
+    private func loadCredentialState() {
+        Task { [weak self] in
+            let hasToken = await Task.detached(priority: .userInitiated) {
+                DiscordTokenStore.load() != nil
+            }.value
+            guard let self else { return }
+            discordHasToken = hasToken
+            if hasToken { await connectDiscord() }
+        }
+
+        Task { [weak self] in
+            let hasToken = await Task.detached(priority: .userInitiated) {
+                OpenAITokenStore.load() != nil
+            }.value
+            self?.openAIHasToken = hasToken
+        }
     }
 
     func refreshMicrophones() {
@@ -322,6 +349,10 @@ final class AppModel: ObservableObject {
 
     func requestSummary(for record: MeetingRecord) {
         guard phase == .idle, record.transcriptURL != nil else { return }
+        if let message = summaryUnavailableMessage {
+            warningMessage = "\(message) Abra Ajustes → Inteligência Artificial para alterar o provedor."
+            return
+        }
         if hasSummary(record) {
             meetingManagementRequest = .replaceSummary(record)
         } else {
@@ -488,6 +519,27 @@ final class AppModel: ObservableObject {
         _ = deviceManager.requestScreenPermission()
     }
 
+    func saveOpenAIToken() {
+        let token = openAITokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+        do {
+            try OpenAITokenStore.save(token)
+            openAITokenDraft = ""
+            openAIHasToken = true
+            openAISettingsMessage = "Chave salva com segurança no Chaves do macOS."
+        } catch {
+            openAIHasToken = OpenAITokenStore.load() != nil
+            openAISettingsMessage = error.localizedDescription
+        }
+    }
+
+    func removeOpenAIToken() {
+        OpenAITokenStore.delete()
+        openAITokenDraft = ""
+        openAIHasToken = false
+        openAISettingsMessage = nil
+    }
+
     func saveDiscordTokenAndConnect() async {
         let token = discordTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else {
@@ -597,7 +649,9 @@ final class AppModel: ObservableObject {
     private func transcribe(_ record: inout MeetingRecord) async {
         phase = .transcribing
         progress = 0.02
-        statusDetail = "Preparando o Whisper local…"
+        let provider = settings.transcriptionProvider
+        let apiKey = provider == .openAI ? OpenAITokenStore.load() : nil
+        statusDetail = provider == .local ? "Preparando o Whisper local…" : "Preparando a transcrição pela OpenAI…"
         var shouldGenerateSummary = false
         do {
             let reportProgress: @Sendable (Double, String) -> Void = { [weak self] value, detail in
@@ -614,6 +668,8 @@ final class AppModel: ObservableObject {
                     audioURL: record.audioURL,
                     language: settings.language,
                     createdAt: record.createdAt,
+                    provider: provider,
+                    apiKey: apiKey,
                     progress: reportProgress
                 )
             } else {
@@ -621,6 +677,8 @@ final class AppModel: ObservableObject {
                     audioURL: record.audioURL,
                     language: settings.language,
                     createdAt: record.createdAt,
+                    provider: provider,
+                    apiKey: apiKey,
                     progress: reportProgress
                 )
             }
@@ -651,7 +709,9 @@ final class AppModel: ObservableObject {
         phase = .summarizing
         summarizingRecordID = record.id
         progress = 0.02
-        statusDetail = "Preparando o resumo local…"
+        let provider = settings.summaryProvider
+        let apiKey = provider == .openAI ? OpenAITokenStore.load() : nil
+        statusDetail = provider == .local ? "Preparando o resumo local…" : "Preparando o resumo pela OpenAI…"
         defer {
             summarizingRecordID = nil
             phase = .idle
@@ -669,6 +729,8 @@ final class AppModel: ObservableObject {
                 folderURL: record.folderURL,
                 overwrite: overwrite,
                 customPrompt: settings.activeCustomSummaryPrompt,
+                provider: provider,
+                apiKey: apiKey,
                 progress: reportProgress
             )
             var updated = meetingStore.records.first(where: { $0.id == record.id }) ?? record
