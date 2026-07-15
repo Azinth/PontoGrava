@@ -24,6 +24,12 @@ struct DiscordRecoveryRequest: Identifiable {
     var id: String { folder.path }
 }
 
+struct DiscordStartRequest: Codable, Equatable {
+    let requestId: String
+    let guildId: String
+    let channelId: String
+}
+
 struct DiscordParticipant: Codable, Hashable {
     let userId: String
     let displayName: String
@@ -127,6 +133,7 @@ enum DiscordTokenStore {
 }
 
 enum DiscordBotEvent {
+    case startRequested(DiscordStartRequest)
     case participant(String)
     case audioLevel(Float)
     case stopped(DiscordCaptureResult)
@@ -163,11 +170,25 @@ final class DiscordBotClient {
         return try decode([DiscordChannel].self, from: value["channels"])
     }
 
-    func start(guildId: String, channelId: String, folder: URL) async throws {
-        _ = try await send(command: "start", values: [
+    func start(
+        guildId: String,
+        channelId: String,
+        folder: URL,
+        requestId: String? = nil
+    ) async throws {
+        var values: [String: Any] = [
             "guildId": guildId,
             "channelId": channelId,
             "folderPath": folder.path
+        ]
+        if let requestId { values["requestId"] = requestId }
+        _ = try await send(command: "start", values: values)
+    }
+
+    func rejectStart(requestId: String, message: String) async {
+        _ = try? await send(command: "rejectStart", values: [
+            "requestId": requestId,
+            "message": message
         ])
     }
 
@@ -295,6 +316,10 @@ final class DiscordBotClient {
               let name = object["event"] as? String,
               let result = object["result"] as? [String: Any] else { return }
         switch name {
+        case "recordingStartRequested":
+            if let request = try? decode(DiscordStartRequest.self, from: result) {
+                onEvent?(.startRequested(request))
+            }
         case "participant":
             if let displayName = result["displayName"] as? String {
                 onEvent?(.participant(displayName))
