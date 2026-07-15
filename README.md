@@ -85,13 +85,23 @@ PontoGrava novamente.
 O app combina sistema e microfone no mesmo WAV. As pausas são removidas do
 áudio, da duração e dos timestamps da transcrição.
 
+## Gerar resumos com IA
+
 Depois da transcrição, abra a aba **Resumo** e clique em **Gerar resumo**. O
-resultado é produzido no Mac, pode ser editado no app e fica salvo em
-`resumo.md`, separado em **O que foi feito**, **O que foi definido** e
-**O que está pendente**. A opção de geração automática fica desativada por padrão e pode
-ser ativada na barra lateral; ela nunca substitui um resumo existente. Em **Prompt padrão**,
-você também pode ativar e salvar instruções próprias para escolher o formato e o foco dos
-resumos. A transcrição e o idioma são adicionados automaticamente ao prompt.
+PontoGrava usa a versão editada de `transcricao.txt` e o modelo local do Apple
+Intelligence para criar um `resumo.md` também editável. Português do Brasil
+(`pt_BR`) e inglês (`en_US`) são selecionados conforme o idioma da transcrição.
+
+Por padrão, o resumo registra **O que foi feito** por cada participante, **O que
+foi definido** na reunião e **O que está pendente**, sem inventar decisões,
+responsáveis ou prazos. Em **Prompt padrão**, você pode ativar e salvar
+instruções próprias para escolher outro formato ou foco; a transcrição e o
+idioma são adicionados automaticamente ao prompt.
+
+A geração automática fica desativada por padrão e pode ser ativada nas
+configurações. Ela roda após uma transcrição bem-sucedida e nunca substitui um
+resumo existente. Para usar o recurso, o Mac precisa executar macOS 26.1 ou
+mais recente com o Apple Intelligence ativado e o modelo disponível.
 
 ## Gravar um canal do Discord
 
