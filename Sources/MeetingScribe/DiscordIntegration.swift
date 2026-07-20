@@ -22,6 +22,46 @@ struct DiscordChannel: Codable, Hashable, Identifiable {
 struct DiscordRecoveryRequest: Identifiable {
     let folder: URL
     var id: String { folder.path }
+
+    static func isRecoverable(
+        in folder: URL,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        let manifestURL = folder.appendingPathComponent(".discord/manifest.json")
+        let audioURL = folder.appendingPathComponent("audio.wav")
+        let hasCompletedCapture = fileManager.fileExists(atPath: manifestURL.path)
+            && fileManager.fileExists(atPath: audioURL.path)
+        return hasCompletedCapture
+            || DiscordRecoverySession.hasRecoverableAudio(in: folder, fileManager: fileManager)
+    }
+}
+
+struct DiscordRecoverySession: Decodable {
+    struct Clip: Decodable {
+        let path: String
+    }
+
+    let clips: [Clip]
+
+    static func hasRecoverableAudio(
+        in folder: URL,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        let hiddenFolder = folder.appendingPathComponent(".discord", isDirectory: true)
+        let sessionURL = hiddenFolder.appendingPathComponent("session.json")
+        guard let data = try? Data(contentsOf: sessionURL),
+              let session = try? JSONDecoder().decode(Self.self, from: data) else {
+            return false
+        }
+        return session.clips.contains { clip in
+            let url = hiddenFolder.appendingPathComponent(clip.path)
+            guard fileManager.fileExists(atPath: url.path),
+                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]) else {
+                return false
+            }
+            return values.isRegularFile == true && (values.fileSize ?? 0) > 0
+        }
+    }
 }
 
 struct DiscordStartRequest: Codable, Equatable {

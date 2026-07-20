@@ -25,6 +25,7 @@ enum DiscordIntegrationCheck {
         }
         """
         try Data(json.utf8).write(to: hidden.appendingPathComponent("manifest.json"))
+        try Data("audio".utf8).write(to: root.appendingPathComponent("audio.wav"))
         let manifest = try DiscordManifest.load(from: root)
         let request = try JSONDecoder().decode(
             DiscordStartRequest.self,
@@ -32,6 +33,7 @@ enum DiscordIntegrationCheck {
         )
         guard manifest.channelName == "Geral",
               manifest.participants.first?.displayName == "Ana",
+              DiscordRecoveryRequest.isRecoverable(in: root),
               request == DiscordStartRequest(
                 requestId: "request",
                 guildId: "guild",
@@ -39,6 +41,28 @@ enum DiscordIntegrationCheck {
               ) else {
             throw CheckError.failed
         }
+
+        try FileManager.default.removeItem(at: hidden.appendingPathComponent("manifest.json"))
+        try FileManager.default.removeItem(at: root.appendingPathComponent("audio.wav"))
+        let sessionURL = hidden.appendingPathComponent("session.json")
+        try Data(#"{"clips":[]}"#.utf8).write(to: sessionURL)
+        guard !DiscordRecoveryRequest.isRecoverable(in: root) else { throw CheckError.failed }
+
+        try Data(#"{"clips":[{"path":"clips/missing.pcm"}]}"#.utf8).write(to: sessionURL)
+        guard !DiscordRecoveryRequest.isRecoverable(in: root) else { throw CheckError.failed }
+
+        let clips = hidden.appendingPathComponent("clips", isDirectory: true)
+        try FileManager.default.createDirectory(at: clips, withIntermediateDirectories: true)
+        try Data().write(to: clips.appendingPathComponent("empty.pcm"))
+        try Data(#"{"clips":[{"path":"clips/empty.pcm"}]}"#.utf8).write(to: sessionURL)
+        guard !DiscordRecoveryRequest.isRecoverable(in: root) else { throw CheckError.failed }
+
+        try Data([0, 1]).write(to: clips.appendingPathComponent("audio.pcm"))
+        try Data(#"{"clips":[{"path":"clips/audio.pcm"}]}"#.utf8).write(to: sessionURL)
+        guard DiscordRecoveryRequest.isRecoverable(in: root) else { throw CheckError.failed }
+
+        try Data("invalid".utf8).write(to: sessionURL)
+        guard !DiscordRecoveryRequest.isRecoverable(in: root) else { throw CheckError.failed }
         print("Discord integration checks passed")
     }
 
