@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -88,6 +88,31 @@ test('accepts start only from the member voice channel while idle', () => {
 
 test('loads the Opus decoder used for received voice packets', () => {
   assert.doesNotThrow(() => new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 }));
+});
+
+test('ends sessions without usable audio without leaving a recovery marker', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pontograva-discord-empty-'));
+  const hidden = join(root, '.discord');
+  const clips = join(hidden, 'clips');
+  mkdirSync(clips, { recursive: true });
+  writeFileSync(join(clips, 'empty.pcm'), '');
+  const sessionPath = join(hidden, 'session.json');
+  writeJSONAtomic(sessionPath, {
+    version: 1,
+    status: 'finalizing',
+    guildId: 'guild',
+    guildName: 'Servidor',
+    channelId: 'channel',
+    channelName: 'Geral',
+    startedAt: new Date().toISOString(),
+    durationSeconds: 4,
+    clips: [{ userId: '1', displayName: 'Ana', offsetMs: 0, path: 'clips/empty.pcm' }]
+  });
+
+  await assert.rejects(finalizeSession(root), /Nenhum áudio foi recebido/);
+  assert.equal(existsSync(sessionPath), false);
+  assert.equal(existsSync(root), true);
+  rmSync(root, { recursive: true, force: true });
 });
 
 test('finalizes aligned participant tracks and mixed wav', async () => {

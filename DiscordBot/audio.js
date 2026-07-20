@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { dirname, join, relative } from 'node:path';
 import { Transform } from 'node:stream';
@@ -131,8 +131,16 @@ export async function finalizeSession(folderPath, ffmpegPath = locateFFmpeg()) {
     ...session.clips.map(clip => Number(clip.endedOffsetMs) || Number(clip.offsetMs) + 1000)
   ) / 1000;
   const durationSeconds = Math.max(0.1, Number(session.durationSeconds) || recoveredDuration);
-  const usableClips = session.clips.filter(clip => existsSync(join(hidden, clip.path)));
-  if (usableClips.length === 0) throw new Error('Nenhum áudio foi recebido do canal do Discord.');
+  const usableClips = session.clips.filter(clip => {
+    const path = join(hidden, clip.path);
+    if (!existsSync(path)) return false;
+    const stats = statSync(path);
+    return stats.isFile() && stats.size > 0;
+  });
+  if (usableClips.length === 0) {
+    rmSync(sessionPath, { force: true });
+    throw new Error('Nenhum áudio foi recebido do canal do Discord.');
+  }
 
   const tracksFolder = join(hidden, 'tracks');
   mkdirSync(tracksFolder, { recursive: true });

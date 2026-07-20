@@ -959,15 +959,10 @@ final class AppModel: ObservableObject {
             options: [.skipsHiddenFiles]
         ) else { return }
         discordRecoveryRequest = folders.first { folder in
-            let sessionURL = folder.appendingPathComponent(".discord/session.json")
-            let manifestURL = folder.appendingPathComponent(".discord/manifest.json")
             let audioURL = folder.appendingPathComponent("audio.wav")
             let alreadyIndexed = records.contains { $0.audioPath == audioURL.path }
             guard !alreadyIndexed else { return false }
-            let hasSession = FileManager.default.fileExists(atPath: sessionURL.path)
-            let hasCompletedCapture = FileManager.default.fileExists(atPath: manifestURL.path)
-                && FileManager.default.fileExists(atPath: audioURL.path)
-            return hasSession || hasCompletedCapture
+            return DiscordRecoveryRequest.isRecoverable(in: folder)
         }.map(DiscordRecoveryRequest.init(folder:))
     }
 }
