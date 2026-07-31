@@ -76,6 +76,18 @@ struct DiscordParticipant: Codable, Hashable {
     let trackPath: String
 }
 
+struct DiscordParticipantCaptureDiagnostics: Codable, Hashable {
+    let userId: String
+    let displayName: String
+    let automaticRestarts: Int
+    let streamErrors: Int
+    let emptyClips: Int
+}
+
+struct DiscordCaptureDiagnostics: Codable, Hashable {
+    let participants: [DiscordParticipantCaptureDiagnostics]
+}
+
 struct DiscordCaptureResult: Codable {
     let guildId: String
     let guildName: String
@@ -98,6 +110,7 @@ struct DiscordManifest: Codable {
     let startedAt: Date
     let durationSeconds: TimeInterval
     let participants: [DiscordParticipant]
+    let captureDiagnostics: DiscordCaptureDiagnostics?
 
     static func load(from folder: URL) throws -> DiscordManifest {
         let url = folder.appendingPathComponent(".discord/manifest.json")
