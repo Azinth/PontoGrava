@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -8,9 +8,12 @@ import { Readable } from 'node:stream';
 import prism from 'prism-media';
 import {
   AudioLevelReporter,
+  SpeakerCaptureCoordinator,
+  buildCaptureDiagnostics,
   createPCMLevelMeter,
   finalizeSession,
   locateFFmpeg,
+  markClipFirstPacket,
   normalizedPCMLevel,
   participantFilter,
   recordingCommandError,
@@ -18,6 +21,20 @@ import {
   startRecordingCommandError,
   writeJSONAtomic
 } from './audio.js';
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function flushTasks() {
+  return new Promise(resolve => setImmediate(resolve));
+}
 
 test('normalizes silent, audible and maximum PCM levels', () => {
   assert.equal(normalizedPCMLevel(Buffer.alloc(16)), 0);
@@ -57,16 +74,198 @@ test('aggregates speakers and limits regular events to ten per second', () => {
   assert.equal(events.at(-1).level, 0);
 });
 
+test('does not duplicate a healthy participant capture', async () => {
+  const active = deferred();
+  let starts = 0;
+  const coordinator = new SpeakerCaptureCoordinator({
+    beginCapture: () => {
+      starts += 1;
+      return active.promise;
+    },
+    isSpeaking: () => false
+  });
+
+  const first = coordinator.request('ana');
+  assert.equal(coordinator.request('ana'), first);
+  assert.equal(starts, 1);
+  active.resolve();
+  await first;
+  assert.equal(starts, 1);
+  coordinator.stop();
+  await coordinator.settle();
+});
+
+test('restarts after a new speaking event arrives while the old capture is ending', async () => {
+  const captures = [];
+  const coordinator = new SpeakerCaptureCoordinator({
+    beginCapture: (_userId, state) => {
+      const capture = { ...deferred(), ...state };
+      captures.push(capture);
+      return capture.promise;
+    },
+    isSpeaking: () => false
+  });
+
+  const first = coordinator.request('ana');
+  captures[0].markEnding();
+  coordinator.request('ana');
+  assert.equal(captures.length, 1);
+  captures[0].resolve();
+  await first;
+  await flushTasks();
+  assert.equal(captures.length, 2);
+
+  coordinator.stop();
+  captures[1].resolve();
+  await coordinator.settle();
+});
+
+test('recovers one participant at the silence boundary without duplicating another', async () => {
+  const captures = new Map();
+  const coordinator = new SpeakerCaptureCoordinator({
+    beginCapture: (userId, state) => {
+      const capture = { ...deferred(), ...state };
+      const userCaptures = captures.get(userId) ?? [];
+      userCaptures.push(capture);
+      captures.set(userId, userCaptures);
+      return capture.promise;
+    },
+    isSpeaking: () => false
+  });
+
+  coordinator.request('ana');
+  coordinator.request('beto');
+  captures.get('ana')[0].markEnding();
+  coordinator.request('ana');
+  coordinator.request('beto');
+  captures.get('ana')[0].resolve();
+  await flushTasks();
+
+  assert.equal(captures.get('ana').length, 2);
+  assert.equal(captures.get('beto').length, 1);
+
+  coordinator.stop();
+  captures.get('ana')[1].resolve();
+  captures.get('beto')[0].resolve();
+  await coordinator.settle();
+});
+
+test('restarts a failed capture while the participant is still speaking', async () => {
+  const second = deferred();
+  let starts = 0;
+  let errors = 0;
+  let restarts = 0;
+  const coordinator = new SpeakerCaptureCoordinator({
+    beginCapture: () => {
+      starts += 1;
+      return starts === 1 ? Promise.reject(new Error('decoder failed')) : second.promise;
+    },
+    isSpeaking: () => true,
+    onError: () => { errors += 1; },
+    onRestart: () => { restarts += 1; },
+    errorRetryMs: 0
+  });
+
+  coordinator.request('ana');
+  await flushTasks();
+  assert.equal(starts, 2);
+  assert.equal(errors, 1);
+  assert.equal(restarts, 1);
+
+  coordinator.stop();
+  second.resolve();
+  await coordinator.settle();
+});
+
+test('does not restart captures after recording stops', async () => {
+  const capture = deferred();
+  let starts = 0;
+  let markEnding;
+  const coordinator = new SpeakerCaptureCoordinator({
+    beginCapture: (_userId, state) => {
+      starts += 1;
+      markEnding = state.markEnding;
+      return capture.promise;
+    },
+    isSpeaking: () => true
+  });
+
+  coordinator.request('ana');
+  markEnding();
+  coordinator.request('ana');
+  coordinator.stop();
+  capture.resolve();
+  await coordinator.settle();
+  await flushTasks();
+  assert.equal(starts, 1);
+});
+
 test('sanitizes participant ids used as filenames', () => {
   assert.equal(safeName('../user:42'), '.._user_42');
 });
 
 test('aligns overlapping clips before mixing', () => {
-  const filter = participantFilter([{ offsetMs: 0 }, { offsetMs: 1250 }], 10);
+  const filter = participantFilter([{ offsetMs: 0 }, { offsetMs: 1250 }]);
   assert.match(filter, /\[0:a\]adelay=0:all=1/);
   assert.match(filter, /\[1:a\]adelay=1250:all=1/);
   assert.match(filter, /amix=inputs=2/);
-  assert.match(filter, /atrim=duration=10\.000/);
+  assert.match(filter, /apad/);
+  assert.match(filter, /loudnorm=I=-18:TP=-2:LRA=11/);
+  assert.doesNotMatch(filter, /atrim/);
+});
+
+test('aligns a recovered capture to its first packet instead of its idle subscription', () => {
+  const clip = { offsetMs: null };
+  const startedAt = '2026-07-24T18:06:25.000Z';
+
+  assert.equal(markClipFirstPacket(
+    clip,
+    startedAt,
+    () => Date.parse('2026-07-24T18:06:29.000Z')
+  ), true);
+  assert.equal(clip.offsetMs, 4_000);
+  assert.equal(markClipFirstPacket(
+    clip,
+    startedAt,
+    () => Date.parse('2026-07-24T18:06:35.000Z')
+  ), false);
+  assert.equal(clip.offsetMs, 4_000);
+  assert.match(participantFilter([clip], 5), /adelay=4000:all=1/);
+});
+
+test('normalizes v2 capture diagnostics and counts discarded empty clips', () => {
+  const diagnostics = buildCaptureDiagnostics({
+    captureDiagnostics: {
+      participants: [{
+        userId: '1',
+        displayName: 'Ana',
+        automaticRestarts: 2,
+        streamErrors: 1,
+        emptyClips: 1
+      }]
+    },
+    clips: [
+      { userId: '1', displayName: 'Ana' },
+      { userId: '2', displayName: 'Beto' }
+    ]
+  }, new Map([['1', 2]]));
+
+  assert.deepEqual(diagnostics.participants, [
+    {
+      userId: '1',
+      displayName: 'Ana',
+      automaticRestarts: 2,
+      streamErrors: 1,
+      emptyClips: 3
+    },
+    {
+      userId: '2',
+      displayName: 'Beto',
+      automaticRestarts: 0,
+      streamErrors: 0,
+      emptyClips: 0
+    }
+  ]);
 });
 
 test('accepts stop only in the active channel and while not finalizing', () => {
@@ -133,6 +332,7 @@ test('finalizes aligned participant tracks and mixed wav', async () => {
     '-f', 's16le', '-ar', '48000', '-ac', '2', join(clips, 'c.pcm')
   ]);
   assert.equal(pcm.status, 0, pcm.stderr?.toString());
+  writeFileSync(join(clips, 'empty.pcm'), '');
   writeJSONAtomic(join(hidden, 'session.json'), {
     version: 1,
     status: 'finalizing',
@@ -145,14 +345,20 @@ test('finalizes aligned participant tracks and mixed wav', async () => {
     clips: [
       { userId: '1', displayName: 'Ana', offsetMs: 0, path: 'clips/a.ogg' },
       { userId: '1', displayName: 'Ana', offsetMs: 750, path: 'clips/b.ogg' },
+      { userId: '1', displayName: 'Ana', offsetMs: 1_250, format: 's16le', path: 'clips/empty.pcm' },
       { userId: '2', displayName: 'Beto', offsetMs: 250, format: 's16le', path: 'clips/c.pcm' }
     ]
   });
 
   const result = await finalizeSession(root, ffmpeg);
+  assert.equal(result.version, 2);
   assert.equal(result.participants.length, 2);
+  assert.equal(result.captureDiagnostics.participants[0].displayName, 'Ana');
+  assert.equal(result.captureDiagnostics.participants[0].emptyClips, 1);
   assert.ok(existsSync(result.audioPath));
   assert.ok(existsSync(result.manifestPath));
+  assert.ok(statSync(result.audioPath).size < 1_000_000);
+  assert.equal(JSON.parse(readFileSync(result.manifestPath, 'utf8')).version, 2);
   assert.ok(!existsSync(join(hidden, 'session.json')));
   rmSync(root, { recursive: true, force: true });
 });

@@ -16,13 +16,16 @@ import {
 import prism from 'prism-media';
 import {
   AudioLevelReporter,
+  SpeakerCaptureCoordinator,
   createPCMLevelMeter,
   finalizeSession,
   locateFFmpeg,
+  markClipFirstPacket,
   readSession,
   recordingCommandError,
   safeName,
   startRecordingCommandError,
+  terminateRunningCommands,
   writeJSONAtomic
 } from './audio.js';
 
@@ -31,6 +34,20 @@ const client = new Client({
 });
 const ffmpegPath = locateFFmpeg();
 let recording = null;
+const finalizations = new Map();
+
+async function finalizeOnce(folderPath) {
+  if (finalizations.has(folderPath)) {
+    throw new Error('Esta gravação já está sendo finalizada.');
+  }
+  const task = finalizeSession(folderPath, ffmpegPath);
+  finalizations.set(folderPath, task);
+  try {
+    return await task;
+  } finally {
+    finalizations.delete(folderPath);
+  }
+}
 let pendingStart = null;
 let emptyTimer = null;
 let isShuttingDown = false;
@@ -95,56 +112,76 @@ function channels(guildId) {
     .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 }
 
-function persistSession() {
-  if (!recording) return;
-  writeJSONAtomic(recording.sessionPath, recording.session);
+function persistSession(current = recording) {
+  if (!current) return;
+  writeJSONAtomic(current.sessionPath, current.session);
+}
+
+function participantDiagnostics(current, userId, displayName = null) {
+  let participant = current.session.captureDiagnostics.participants
+    .find(item => item.userId === userId);
+  if (!participant) {
+    participant = {
+      userId,
+      displayName: displayName ?? userId,
+      automaticRestarts: 0,
+      streamErrors: 0,
+      emptyClips: 0
+    };
+    current.session.captureDiagnostics.participants.push(participant);
+  } else if (displayName) {
+    participant.displayName = displayName;
+  }
+  return participant;
+}
+
+function beginSpeakerCapture(current, userId, { markEnding }) {
+  const member = current.guild.members.cache.get(userId);
+  const displayName = member?.displayName ?? member?.user?.username ?? userId;
+  participantDiagnostics(current, userId, displayName);
+  const index = current.session.clips.length + 1;
+  const clip = {
+    userId,
+    displayName,
+    offsetMs: null,
+    format: 's16le',
+    path: `clips/${safeName(userId)}-${String(index).padStart(5, '0')}.pcm`
+  };
+  current.session.clips.push(clip);
+  persistSession(current);
+
+  const opus = current.connection.receiver.subscribe(userId, {
+    end: { behavior: EndBehaviorType.AfterSilence, duration: 250 }
+  });
+  opus.once('data', () => {
+    if (markClipFirstPacket(clip, current.session.startedAt)) persistSession(current);
+  });
+  opus.once('end', markEnding);
+  opus.once('close', markEnding);
+  opus.once('error', markEnding);
+  const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
+  const meter = createPCMLevelMeter(level => {
+    if (recording === current) current.audioLevels.update(userId, level);
+  });
+  const output = createWriteStream(join(current.hiddenPath, clip.path));
+  event('participant', { userId, displayName });
+
+  return new Promise((resolve, reject) => {
+    pipeline(opus, decoder, meter, output, error => {
+      markEnding();
+      clip.endedOffsetMs = Date.now() - Date.parse(current.session.startedAt);
+      if (recording === current) persistSession(current);
+      current.audioLevels.remove(userId);
+      if (error) reject(error);
+      else resolve();
+    });
+  });
 }
 
 function recordSpeaker(userId) {
-  if (!recording || userId === client.user.id || recording.activeUsers.has(userId)) return;
-  try {
-    const current = recording;
-    const member = current.guild.members.cache.get(userId);
-    const displayName = member?.displayName ?? member?.user?.username ?? userId;
-    const offsetMs = Date.now() - Date.parse(current.session.startedAt);
-    const index = current.session.clips.length + 1;
-    const clip = {
-      userId,
-      displayName,
-      offsetMs,
-      format: 's16le',
-      path: `clips/${safeName(userId)}-${String(index).padStart(5, '0')}.pcm`
-    };
-    current.session.clips.push(clip);
-    persistSession();
-
-    const opus = current.connection.receiver.subscribe(userId, {
-      end: { behavior: EndBehaviorType.AfterSilence, duration: 250 }
-    });
-    const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
-    const meter = createPCMLevelMeter(level => {
-      if (recording === current) current.audioLevels.update(userId, level);
-    });
-    const output = createWriteStream(join(current.hiddenPath, clip.path));
-    current.activeUsers.add(userId);
-    const finished = new Promise(resolve => {
-      pipeline(opus, decoder, meter, output, error => {
-        clip.endedOffsetMs = Date.now() - Date.parse(current.session.startedAt);
-        if (recording === current) persistSession();
-        current.activeUsers.delete(userId);
-        current.audioLevels.remove(userId);
-        if (error) process.stderr.write(`Discord clip: ${error.message}\n`);
-        resolve();
-      });
-    });
-    current.pipelines.add(finished);
-    finished.finally(() => current.pipelines.delete(finished));
-    event('participant', { userId, displayName });
-  } catch (error) {
-    process.stderr.write(`Discord receiver: ${error.stack ?? error.message}\n`);
-    stopRecording('receiver-error').then(result => event('recordingStopped', result))
-      .catch(() => event('recordingFailed', { message: `Não foi possível receber o áudio: ${error.message}` }));
-  }
+  const current = recording;
+  if (!current || userId === client.user.id) return;
+  current.captureCoordinator.request(userId);
 }
 
 function scheduleEmptyStop() {
@@ -180,14 +217,15 @@ async function startRecording(command) {
   const hiddenPath = join(command.folderPath, '.discord');
   mkdirSync(join(hiddenPath, 'clips'), { recursive: true });
   const session = {
-    version: 1,
+    version: 2,
     status: 'recording',
     guildId: guild.id,
     guildName: guild.name,
     channelId: channel.id,
     channelName: channel.name,
     startedAt: new Date().toISOString(),
-    clips: []
+    clips: [],
+    captureDiagnostics: { participants: [] }
   };
   const connection = joinVoiceChannel({
     channelId: channel.id,
@@ -210,7 +248,7 @@ async function startRecording(command) {
     throw error;
   }
 
-  recording = {
+  const current = {
     folderPath: command.folderPath,
     hiddenPath,
     sessionPath: join(hiddenPath, 'session.json'),
@@ -218,11 +256,23 @@ async function startRecording(command) {
     guild,
     channel,
     connection,
-    activeUsers: new Set(),
-    pipelines: new Set(),
     audioLevels: new AudioLevelReporter(level => event('audioLevel', { level }))
   };
-  persistSession();
+  current.captureCoordinator = new SpeakerCaptureCoordinator({
+    beginCapture: (userId, state) => beginSpeakerCapture(current, userId, state),
+    isSpeaking: userId => connection.receiver.speaking.users.has(userId),
+    onError: (userId, error) => {
+      participantDiagnostics(current, userId).streamErrors += 1;
+      persistSession(current);
+      process.stderr.write(`Discord clip: ${error.message}\n`);
+    },
+    onRestart: userId => {
+      participantDiagnostics(current, userId).automaticRestarts += 1;
+      persistSession(current);
+    }
+  });
+  recording = current;
+  persistSession(current);
   connection.receiver.speaking.on('start', recordSpeaker);
   connection.on(VoiceConnectionStatus.Disconnected, () => {
     if (!recording) return;
@@ -234,9 +284,11 @@ async function startRecording(command) {
       await channel.send('🔴 O PontoGrava iniciou a gravação desta reunião.');
     } catch (error) {
       connection.receiver.speaking.off('start', recordSpeaker);
-      recording.audioLevels.reset();
-      connection.destroy();
       recording = null;
+      current.captureCoordinator.stop();
+      current.audioLevels.reset();
+      connection.destroy();
+      await current.captureCoordinator.settle();
       throw new Error(`O bot entrou no canal, mas não pôde publicar o aviso: ${error.message}`);
     }
   }
@@ -248,16 +300,17 @@ async function stopRecording(reason = 'manual', announce = true) {
   const current = recording;
   if (!current) throw new Error('Não há gravação do Discord em andamento.');
   recording = null;
+  current.captureCoordinator.stop();
   clearTimeout(emptyTimer);
   emptyTimer = null;
   current.audioLevels.reset();
   current.connection.receiver.speaking.off('start', recordSpeaker);
   current.connection.destroy();
-  await Promise.allSettled([...current.pipelines]);
+  await current.captureCoordinator.settle();
   current.session.status = 'finalizing';
   current.session.durationSeconds = Math.max(0.1, (Date.now() - Date.parse(current.session.startedAt)) / 1000);
   writeJSONAtomic(current.sessionPath, current.session);
-  const result = await finalizeSession(current.folderPath, ffmpegPath);
+  const result = await finalizeOnce(current.folderPath);
   if (announce && typeof current.channel.send === 'function') {
     try {
       await current.channel.send(`⏹️ O PontoGrava encerrou a gravação (${reason}).`);
@@ -392,7 +445,7 @@ async function handle(command) {
     const session = readSession(command.folderPath);
     session.status = 'finalizing';
     writeJSONAtomic(join(command.folderPath, '.discord', 'session.json'), session);
-    return finalizeSession(command.folderPath, ffmpegPath);
+    return finalizeOnce(command.folderPath);
   }
   default: throw new Error(`Comando desconhecido: ${command.command}`);
   }
@@ -417,6 +470,7 @@ async function shutdown() {
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
   } finally {
+    terminateRunningCommands();
     client.destroy();
     process.exit(0);
   }

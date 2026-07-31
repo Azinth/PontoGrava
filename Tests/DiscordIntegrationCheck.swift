@@ -11,6 +11,52 @@ enum DiscordIntegrationCheck {
 
         let json = """
         {
+          "version": 2,
+          "status": "complete",
+          "guildId": "1",
+          "guildName": "Servidor",
+          "channelId": "2",
+          "channelName": "Geral",
+          "startedAt": "2026-07-10T12:00:00Z",
+          "durationSeconds": 42,
+          "participants": [
+            {"userId":"3","displayName":"Ana","trackPath":".discord/tracks/3.wav"}
+          ],
+          "captureDiagnostics": {
+            "participants": [
+              {
+                "userId":"3",
+                "displayName":"Ana",
+                "automaticRestarts":1,
+                "streamErrors":0,
+                "emptyClips":1
+              }
+            ]
+          }
+        }
+        """
+        try Data(json.utf8).write(to: hidden.appendingPathComponent("manifest.json"))
+        try Data("audio".utf8).write(to: root.appendingPathComponent("audio.wav"))
+        let manifest = try DiscordManifest.load(from: root)
+        let request = try JSONDecoder().decode(
+            DiscordStartRequest.self,
+            from: Data(#"{"requestId":"request","guildId":"guild","channelId":"channel"}"#.utf8)
+        )
+        guard manifest.channelName == "Geral",
+              manifest.participants.first?.displayName == "Ana",
+              manifest.captureDiagnostics?.participants.first?.automaticRestarts == 1,
+              manifest.captureDiagnostics?.participants.first?.emptyClips == 1,
+              DiscordRecoveryRequest.isRecoverable(in: root),
+              request == DiscordStartRequest(
+                requestId: "request",
+                guildId: "guild",
+                channelId: "channel"
+              ) else {
+            throw CheckError.failed
+        }
+
+        let legacyJSON = """
+        {
           "version": 1,
           "status": "complete",
           "guildId": "1",
@@ -24,21 +70,8 @@ enum DiscordIntegrationCheck {
           ]
         }
         """
-        try Data(json.utf8).write(to: hidden.appendingPathComponent("manifest.json"))
-        try Data("audio".utf8).write(to: root.appendingPathComponent("audio.wav"))
-        let manifest = try DiscordManifest.load(from: root)
-        let request = try JSONDecoder().decode(
-            DiscordStartRequest.self,
-            from: Data(#"{"requestId":"request","guildId":"guild","channelId":"channel"}"#.utf8)
-        )
-        guard manifest.channelName == "Geral",
-              manifest.participants.first?.displayName == "Ana",
-              DiscordRecoveryRequest.isRecoverable(in: root),
-              request == DiscordStartRequest(
-                requestId: "request",
-                guildId: "guild",
-                channelId: "channel"
-              ) else {
+        try Data(legacyJSON.utf8).write(to: hidden.appendingPathComponent("manifest.json"))
+        guard try DiscordManifest.load(from: root).captureDiagnostics == nil else {
             throw CheckError.failed
         }
 
