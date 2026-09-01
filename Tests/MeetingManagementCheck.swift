@@ -82,15 +82,95 @@ enum MeetingManagementCheck {
         let renamedWithoutTranscript = try service.rename(noTranscript, to: "Somente áudio")
         check(renamedWithoutTranscript.transcriptPath == nil, "missing transcript remains nil")
 
+        let usageFolder = root.appendingPathComponent("Tamanho", isDirectory: true)
+        let hiddenUsageFolder = usageFolder.appendingPathComponent(".discord", isDirectory: true)
+        try FileManager.default.createDirectory(at: hiddenUsageFolder, withIntermediateDirectories: true)
+        try Data(repeating: 0xAB, count: 65_536)
+            .write(to: usageFolder.appendingPathComponent("audio.wav"))
+        try Data(repeating: 0xCD, count: 32_768)
+            .write(to: hiddenUsageFolder.appendingPathComponent("clip.pcm"))
+        let usageWithRecovery = MeetingFileService.diskUsage(at: usageFolder)
+        try FileManager.default.removeItem(at: hiddenUsageFolder)
+        let usageWithoutRecovery = MeetingFileService.diskUsage(at: usageFolder)
+        check(usageWithRecovery >= 98_304, "disk usage counts meeting files")
+        check(usageWithRecovery > usageWithoutRecovery, "disk usage includes hidden recovery")
+
         let trashDestination = root.appendingPathComponent("Trash", isDirectory: true)
-        let recycleService = MeetingFileService { urls, completion in
-            completion([urls[0]: trashDestination], nil)
+        let recycleService = recyclingService(trash: trashDestination)
+
+        let audioCleanup = try fixture(in: root, name: "LimparAudio", discord: true)
+        let audioResult = try await recycleService.moveToTrash(audioCleanup, scope: .audio)
+        check(audioResult?.id == audioCleanup.id, "audio cleanup keeps meeting")
+        check(!FileManager.default.fileExists(atPath: audioCleanup.audioPath), "audio removed")
+        check(!FileManager.default.fileExists(atPath: audioCleanup.folderURL.appendingPathComponent(".discord").path), "hidden recovery removed")
+        check(FileManager.default.fileExists(atPath: audioCleanup.transcriptPath!), "audio cleanup keeps transcript")
+        check(FileManager.default.fileExists(atPath: audioCleanup.summaryPath!), "audio cleanup keeps summary")
+
+        let textCleanup = try fixture(in: root, name: "LimparTexto", discord: true)
+        let textResult = try await recycleService.moveToTrash(textCleanup, scope: .text)
+        check(textResult?.transcriptPath == nil, "text cleanup clears transcript path")
+        check(textResult?.summaryPath == nil, "text cleanup clears summary path")
+        check(FileManager.default.fileExists(atPath: textCleanup.audioPath), "text cleanup keeps audio")
+        check(FileManager.default.fileExists(atPath: textCleanup.folderURL.appendingPathComponent(".discord").path), "text cleanup keeps recovery")
+        check(!FileManager.default.fileExists(atPath: textCleanup.transcriptPath!), "transcript removed")
+        check(!FileManager.default.fileExists(atPath: textCleanup.summaryPath!), "summary removed")
+
+        let fullCleanup = try fixture(in: root, name: "LimparTudo", discord: true)
+        let fullResult = try await recycleService.moveToTrash(fullCleanup, scope: .all)
+        check(fullResult == nil, "full cleanup removes meeting")
+        check(!FileManager.default.fileExists(atPath: fullCleanup.folderPath), "full folder removed")
+
+        let oldest = Date(timeIntervalSince1970: 1)
+        let middle = Date(timeIntervalSince1970: 2)
+        let newest = Date(timeIntervalSince1970: 3)
+        let textOnly = try fixture(
+            in: root,
+            name: "SomenteTexto",
+            createdAt: oldest,
+            audio: false,
+            discord: false
+        )
+        let hiddenOnly = try fixture(
+            in: root,
+            name: "SomenteRecuperacao",
+            createdAt: middle,
+            audio: false,
+            transcript: false,
+            summary: false,
+            discord: true
+        )
+        let newestAudio = try fixture(
+            in: root,
+            name: "AudioNovo",
+            createdAt: newest,
+            transcript: false,
+            summary: false,
+            discord: false
+        )
+        let audioEligible = recycleService.eligibleRecords(
+            from: [newestAudio, textOnly, hiddenOnly],
+            for: .audio
+        )
+        check(audioEligible.map(\.id) == [hiddenOnly.id, newestAudio.id], "oldest eligible audio order")
+        let textEligible = recycleService.eligibleRecords(
+            from: [newestAudio, textOnly, hiddenOnly],
+            for: .text
+        )
+        check(textEligible.map(\.id) == [textOnly.id], "missing text excluded")
+
+        let failedRecycle = MeetingFileService { _, completion in completion([:], nil) }
+        let failedRecord = try fixture(in: root, name: "FalhaLixeira")
+        do {
+            _ = try await failedRecycle.moveToTrash(failedRecord, scope: .all)
+            fail("unconfirmed recycle should fail")
+        } catch MeetingFileError.recycleFailed {
         }
-        try await recycleService.moveToTrash(renamedWithoutTranscript)
+
+        _ = try await recycleService.moveToTrash(renamedWithoutTranscript, scope: .all)
 
         let missing = record(folder: root.appendingPathComponent("Ausente"), transcript: nil)
         do {
-            try await recycleService.moveToTrash(missing)
+            _ = try await recycleService.moveToTrash(missing, scope: .all)
             fail("missing folder should fail")
         } catch MeetingFileError.folderMissing {
         }
@@ -98,10 +178,69 @@ enum MeetingManagementCheck {
         print("Meeting management checks passed")
     }
 
-    private static func record(folder: URL, transcript: URL?, summary: URL? = nil) -> MeetingRecord {
+    private static func fixture(
+        in root: URL,
+        name: String,
+        createdAt: Date = Date(),
+        audio: Bool = true,
+        transcript: Bool = true,
+        summary: Bool = true,
+        discord: Bool = false
+    ) throws -> MeetingRecord {
+        let folder = root.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let audioURL = folder.appendingPathComponent("audio.wav")
+        let transcriptURL = folder.appendingPathComponent("transcricao.txt")
+        let summaryURL = folder.appendingPathComponent("resumo.md")
+        if audio { try Data("audio".utf8).write(to: audioURL) }
+        if transcript { try Data("texto".utf8).write(to: transcriptURL) }
+        if summary { try Data("resumo".utf8).write(to: summaryURL) }
+        if discord {
+            let hidden = folder.appendingPathComponent(".discord", isDirectory: true)
+            let clips = hidden.appendingPathComponent("clips", isDirectory: true)
+            let tracks = hidden.appendingPathComponent("tracks", isDirectory: true)
+            try FileManager.default.createDirectory(at: clips, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: tracks, withIntermediateDirectories: true)
+            try Data("pcm".utf8).write(to: clips.appendingPathComponent("clip.pcm"))
+            try Data("track".utf8).write(to: tracks.appendingPathComponent("participant.wav"))
+            try Data("{}".utf8).write(to: hidden.appendingPathComponent("manifest.json"))
+        }
+        return record(
+            folder: folder,
+            transcript: transcript ? transcriptURL : nil,
+            summary: summary ? summaryURL : nil,
+            createdAt: createdAt
+        )
+    }
+
+    private static func recyclingService(trash: URL) -> MeetingFileService {
+        MeetingFileService { urls, completion in
+            do {
+                try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+                var recycled: [URL: URL] = [:]
+                for source in urls {
+                    let destination = trash.appendingPathComponent(
+                        "\(UUID().uuidString)-\(source.lastPathComponent)"
+                    )
+                    try FileManager.default.moveItem(at: source, to: destination)
+                    recycled[source] = destination
+                }
+                completion(recycled, nil)
+            } catch {
+                completion([:], error)
+            }
+        }
+    }
+
+    private static func record(
+        folder: URL,
+        transcript: URL?,
+        summary: URL? = nil,
+        createdAt: Date = Date()
+    ) -> MeetingRecord {
         MeetingRecord(
             id: UUID(),
-            createdAt: Date(),
+            createdAt: createdAt,
             title: folder.lastPathComponent,
             folderPath: folder.path,
             audioPath: folder.appendingPathComponent("audio.wav").path,

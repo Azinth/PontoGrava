@@ -16,7 +16,23 @@ enum MeetingFileError: LocalizedError, Equatable {
         case .destinationExists:
             "Já existe uma pasta com esse nome. Escolha outro nome."
         case .recycleFailed:
-            "A pasta não pôde ser movida para a Lixeira."
+            "Os arquivos não puderam ser movidos para a Lixeira."
+        }
+    }
+}
+
+enum MeetingDeletionScope: String, CaseIterable, Identifiable {
+    case audio
+    case text
+    case all
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .audio: "Áudio"
+        case .text: "Texto"
+        case .all: "Áudio e texto"
         }
     }
 }
@@ -45,6 +61,34 @@ final class MeetingFileService {
             throw MeetingFileError.invalidName
         }
         return name
+    }
+
+    nonisolated static func diskUsage(at folder: URL) -> Int64 {
+        let keys: Set<URLResourceKey> = [
+            .isRegularFileKey,
+            .totalFileAllocatedSizeKey,
+            .fileAllocatedSizeKey,
+            .fileSizeKey,
+        ]
+        guard let files = FileManager.default.enumerator(
+            at: folder,
+            includingPropertiesForKeys: Array(keys),
+            options: [],
+            errorHandler: { _, _ in true }
+        ) else { return 0 }
+
+        var total: Int64 = 0
+        for case let file as URL in files {
+            guard let values = try? file.resourceValues(forKeys: keys),
+                  values.isRegularFile == true else { continue }
+            total += Int64(
+                values.totalFileAllocatedSize
+                    ?? values.fileAllocatedSize
+                    ?? values.fileSize
+                    ?? 0
+            )
+        }
+        return total
     }
 
     func rename(_ record: MeetingRecord, to rawName: String) throws -> MeetingRecord {
@@ -102,17 +146,74 @@ final class MeetingFileService {
         return name
     }
 
-    func moveToTrash(_ record: MeetingRecord) async throws {
-        let folder = record.folderURL.standardizedFileURL
-        guard fileManager.fileExists(atPath: folder.path) else {
-            throw MeetingFileError.folderMissing
+    func hasContent(_ scope: MeetingDeletionScope, in record: MeetingRecord) -> Bool {
+        switch scope {
+        case .audio:
+            fileManager.fileExists(atPath: record.audioPath)
+                || fileManager.fileExists(atPath: discordFolder(for: record).path)
+        case .text:
+            hasTranscript(in: record)
+                || record.summaryURL.map { fileManager.fileExists(atPath: $0.path) } == true
+        case .all:
+            fileManager.fileExists(atPath: record.folderPath)
         }
+    }
 
+    func hasTranscript(in record: MeetingRecord) -> Bool {
+        record.transcriptURL.map { fileManager.fileExists(atPath: $0.path) } == true
+    }
+
+    func eligibleRecords(
+        from records: [MeetingRecord],
+        for scope: MeetingDeletionScope
+    ) -> [MeetingRecord] {
+        records
+            .filter { hasContent(scope, in: $0) }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    func moveToTrash(
+        _ record: MeetingRecord,
+        scope: MeetingDeletionScope
+    ) async throws -> MeetingRecord? {
+        switch scope {
+        case .all:
+            let folder = record.folderURL.standardizedFileURL
+            guard fileManager.fileExists(atPath: folder.path) else {
+                throw MeetingFileError.folderMissing
+            }
+            try await recycle([folder])
+            return nil
+        case .audio:
+            let urls = [record.audioURL, discordFolder(for: record)].filter {
+                fileManager.fileExists(atPath: $0.path)
+            }
+            if !urls.isEmpty { try await recycle(urls) }
+            return record
+        case .text:
+            let urls = [record.transcriptURL, record.summaryURL]
+                .compactMap { $0 }
+                .filter { fileManager.fileExists(atPath: $0.path) }
+            if !urls.isEmpty { try await recycle(urls) }
+            var updated = record
+            updated.transcriptPath = nil
+            updated.summaryPath = nil
+            return updated
+        }
+    }
+
+    private func discordFolder(for record: MeetingRecord) -> URL {
+        record.folderURL.appendingPathComponent(".discord", isDirectory: true)
+    }
+
+    private func recycle(_ urls: [URL]) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            recycler([folder]) { recycledURLs, error in
+            recycler(urls) { recycledURLs, error in
                 if let error {
                     continuation.resume(throwing: error)
-                } else if recycledURLs.keys.contains(where: { $0.standardizedFileURL == folder }) {
+                } else if urls.allSatisfy({ source in
+                    recycledURLs.keys.contains { $0.standardizedFileURL == source.standardizedFileURL }
+                }) {
                     continuation.resume()
                 } else {
                     continuation.resume(throwing: MeetingFileError.recycleFailed)

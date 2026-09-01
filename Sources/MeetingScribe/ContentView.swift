@@ -22,17 +22,27 @@ struct ContentView: View {
             RenameMeetingView(record: record)
                 .environmentObject(model)
         }
-        .alert(
-            "Mover reunião para a Lixeira?",
+        .confirmationDialog(
+            "Excluir conteúdo da reunião?",
             isPresented: deleteRequestPresented,
+            titleVisibility: .visible,
             presenting: deleteRecord
         ) { record in
-            Button("Cancelar", role: .cancel) { model.meetingManagementRequest = nil }
-            Button("Mover para a Lixeira", role: .destructive) {
-                Task { await model.deleteMeeting(record) }
+            Button("Excluir apenas o áudio", role: .destructive) {
+                Task { await model.deleteMeeting(record, scope: .audio) }
             }
+            .disabled(!model.hasContent(.audio, in: record))
+            Button("Excluir apenas o texto", role: .destructive) {
+                Task { await model.deleteMeeting(record, scope: .text) }
+            }
+            .disabled(!model.hasContent(.text, in: record))
+            Button("Excluir áudio e texto", role: .destructive) {
+                Task { await model.deleteMeeting(record, scope: .all) }
+            }
+            .disabled(!model.hasContent(.all, in: record))
+            Button("Cancelar", role: .cancel) { model.meetingManagementRequest = nil }
         } message: { _ in
-            Text("A pasta completa, incluindo o WAV e a transcrição, poderá ser recuperada pela Lixeira.")
+            Text("Os itens escolhidos serão movidos para a Lixeira. Excluir o áudio também remove todas as partes ocultas usadas na recuperação.")
         }
         .alert(
             "Pasta não encontrada",
@@ -160,16 +170,6 @@ private struct AppSidebar: View {
             List(filteredRecords, selection: $model.selectedRecordID) { record in
                 MeetingRow(record: record)
                     .tag(record.id)
-                    .contextMenu {
-                        Button("Renomear…") { model.presentRename(record) }
-                            .disabled(model.isBusy)
-                        Button("Mostrar no Finder") { model.reveal(record) }
-                        Divider()
-                        Button("Mover para a Lixeira", role: .destructive) {
-                            model.presentDelete(record)
-                        }
-                        .disabled(model.isBusy)
-                    }
             }
             .listStyle(.sidebar)
             .searchable(text: $searchText, placement: .sidebar, prompt: "Buscar reuniões")
@@ -208,7 +208,7 @@ private struct AppStatusPill: View {
     private var icon: String {
         switch model.phase {
         case .idle: "checkmark.circle.fill"
-        case .preparing, .finalizing, .transcribing, .summarizing: "hourglass"
+        case .preparing, .finalizing, .transcribing, .summarizing, .cleaning: "hourglass"
         case .recording: "record.circle.fill"
         case .paused: "pause.circle.fill"
         }
@@ -217,7 +217,7 @@ private struct AppStatusPill: View {
     private var color: Color {
         switch model.phase {
         case .idle: .green
-        case .preparing, .finalizing, .transcribing, .summarizing: .blue
+        case .preparing, .finalizing, .transcribing, .summarizing, .cleaning: .blue
         case .recording: .red
         case .paused: .orange
         }
@@ -225,30 +225,77 @@ private struct AppStatusPill: View {
 }
 
 private struct MeetingRow: View {
+    @EnvironmentObject private var model: AppModel
     let record: MeetingRecord
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(record.title)
-                .font(.headline)
-                .lineLimit(1)
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(record.title)
+                    .font(.headline)
+                    .lineLimit(1)
 
-            HStack(spacing: 5) {
-                Text(formattedDuration(record.duration))
-                Text("•")
-                Label(record.status.title, systemImage: meetingStatusIcon(record.status))
-                    .labelStyle(.titleOnly)
-            }
-            .font(.caption)
-            .foregroundStyle(record.status == .failed ? Color.orange : Color.secondary)
+                HStack(spacing: 5) {
+                    Text(formattedDuration(record.duration))
+                    Text("•")
+                    Label(record.status.title, systemImage: meetingStatusIcon(record.status))
+                        .labelStyle(.titleOnly)
+                }
+                .font(.caption)
+                .foregroundStyle(record.status == .failed ? Color.orange : Color.secondary)
 
-            Text(record.microphoneName)
+                HStack(spacing: 5) {
+                    Text(record.microphoneName)
+                        .lineLimit(1)
+                    Text("•")
+                    Text(model.formattedDiskUsage(for: record))
+                        .fixedSize()
+                }
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
-                .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+
+            Menu {
+                actions
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.body)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Ações da reunião")
+            .accessibilityLabel("Ações de \(record.title)")
         }
         .padding(.vertical, 5)
-        .accessibilityElement(children: .combine)
+        .contextMenu { actions }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        Button {
+            model.presentRename(record)
+        } label: {
+            Label("Renomear…", systemImage: "pencil")
+        }
+        .disabled(model.isBusy)
+
+        Button {
+            model.reveal(record)
+        } label: {
+            Label("Mostrar no Finder", systemImage: "folder")
+        }
+
+        Divider()
+
+        Button(role: .destructive) {
+            model.presentDelete(record)
+        } label: {
+            Label("Excluir…", systemImage: "trash")
+        }
+        .disabled(model.isBusy)
     }
 }
 
@@ -1042,7 +1089,7 @@ private struct MainLiveWaveformView: View {
         switch phase {
         case .recording: max(0.1, CGFloat(level))
         case .paused: 0.18
-        case .preparing, .finalizing, .transcribing, .summarizing: 0.22
+        case .preparing, .finalizing, .transcribing, .summarizing, .cleaning: 0.22
         case .idle: 0.3
         }
     }
@@ -1051,7 +1098,7 @@ private struct MainLiveWaveformView: View {
         switch phase {
         case .recording: .red
         case .paused: .orange
-        case .preparing, .finalizing, .transcribing, .summarizing: .blue
+        case .preparing, .finalizing, .transcribing, .summarizing, .cleaning: .blue
         case .idle: .secondary.opacity(0.28)
         }
     }
@@ -1224,7 +1271,7 @@ private struct MeetingDetailView: View {
                         Label("Refazer transcrição", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
-                    .disabled(model.isBusy)
+                    .disabled(model.isBusy || !model.hasContent(.audio, in: record))
 
                     Button {
                         model.requestSummary(for: record)
@@ -1237,7 +1284,7 @@ private struct MeetingDetailView: View {
                     .buttonStyle(.bordered)
                     .disabled(
                         model.isBusy
-                            || record.transcriptURL == nil
+                            || !model.hasTranscript(in: record)
                     )
 
                     Spacer()
@@ -1257,6 +1304,9 @@ private struct MeetingDetailView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
+            Label("\(model.formattedDiskUsage(for: record)) no disco", systemImage: "internaldrive")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -1268,16 +1318,16 @@ private struct MeetingDetailView: View {
             Button("Refazer transcrição") {
                 Task { await model.retranscribe(record) }
             }
-            .disabled(model.isBusy)
+            .disabled(model.isBusy || !model.hasContent(.audio, in: record))
             Button(model.hasSummary(record) ? "Refazer resumo" : "Gerar resumo") {
                 model.requestSummary(for: record)
             }
             .disabled(
                 model.isBusy
-                    || record.transcriptURL == nil
+                    || !model.hasTranscript(in: record)
             )
             Divider()
-            Button("Mover para a Lixeira", role: .destructive) {
+            Button("Excluir…", role: .destructive) {
                 model.presentDelete(record)
             }
             .disabled(model.isBusy)
@@ -1402,7 +1452,7 @@ private struct SummaryPreviewView: View {
                     .tint(brandAccent)
                     .disabled(
                         model.isBusy
-                            || record.transcriptURL == nil
+                            || !model.hasTranscript(in: record)
                     )
                 }
             }
