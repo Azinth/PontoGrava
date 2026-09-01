@@ -71,6 +71,7 @@ enum AppPhase: Equatable {
     case finalizing
     case transcribing
     case summarizing
+    case cleaning
 
     var title: String {
         switch self {
@@ -81,6 +82,7 @@ enum AppPhase: Equatable {
         case .finalizing: "Finalizando o WAV"
         case .transcribing: "Transcrevendo"
         case .summarizing: "Gerando resumo"
+        case .cleaning: "Limpando reuniões"
         }
     }
 }

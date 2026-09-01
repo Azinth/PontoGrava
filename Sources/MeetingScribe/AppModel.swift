@@ -22,7 +22,12 @@ final class AppModel: ObservableObject {
         didSet { settings.discordChannelID = selectedDiscordChannelID }
     }
     @Published var selectedRecordID: UUID? {
-        didSet { playbackController.load(selectedRecord) }
+        didSet {
+            playbackController.load(selectedRecord)
+            if let selectedRecord {
+                Task { await refreshMeetingDiskUsage(for: selectedRecord) }
+            }
+        }
     }
     @Published var phase: AppPhase = .idle
     @Published var progress: Double = 0
@@ -35,6 +40,7 @@ final class AppModel: ObservableObject {
     @Published var showNotificationInvitation = false
     @Published private(set) var summaryRevision = 0
     @Published private(set) var summarizingRecordID: UUID?
+    @Published private(set) var meetingDiskUsage: [UUID: Int64] = [:]
     @Published private(set) var recordingTimeline = RecordingTimeline()
     @Published private(set) var systemAudioLevel: Float = 0
     @Published private(set) var microphoneAudioLevel: Float = 0
@@ -156,6 +162,7 @@ final class AppModel: ObservableObject {
         refreshMicrophones()
         detectDiscordRecoverySession()
         restoreSummaryPaths()
+        Task { [weak self] in await self?.refreshMeetingDiskUsage() }
         if selectedRecordID == nil { selectedRecordID = records.first?.id }
         loadCredentialState()
         await refreshNotificationPermission()
@@ -290,6 +297,7 @@ final class AppModel: ObservableObject {
                 microphoneName: activeMicrophoneName ?? "Microfone"
             )
             meetingStore.upsert(record)
+            await refreshMeetingDiskUsage(for: record)
             selectedRecordID = record.id
             clearActiveRecording()
             await transcribe(&record)
@@ -330,6 +338,7 @@ final class AppModel: ObservableObject {
                 microphoneName: "Arquivo importado"
             )
             meetingStore.upsert(record)
+            await refreshMeetingDiskUsage(for: record)
             selectedRecordID = record.id
             await transcribe(&record)
         } catch {
@@ -398,7 +407,12 @@ final class AppModel: ObservableObject {
     }
 
     func reveal(_ record: MeetingRecord) {
-        NSWorkspace.shared.activateFileViewerSelecting([record.audioURL])
+        let candidates = [record.audioURL, record.transcriptURL, record.summaryURL].compactMap { $0 }
+        if let existing = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+            NSWorkspace.shared.activateFileViewerSelecting([existing])
+        } else if FileManager.default.fileExists(atPath: record.folderPath) {
+            NSWorkspace.shared.open(record.folderURL)
+        }
     }
 
     func openOutputFolder() {
@@ -432,21 +446,63 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func deleteMeeting(_ record: MeetingRecord) async {
+    func hasContent(_ scope: MeetingDeletionScope, in record: MeetingRecord) -> Bool {
+        meetingFileService.hasContent(scope, in: record)
+    }
+
+    func hasTranscript(in record: MeetingRecord) -> Bool {
+        meetingFileService.hasTranscript(in: record)
+    }
+
+    func formattedDiskUsage(for record: MeetingRecord) -> String {
+        guard let bytes = meetingDiskUsage[record.id] else { return "Calculando…" }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    func eligibleRecords(for scope: MeetingDeletionScope) -> [MeetingRecord] {
+        meetingFileService.eligibleRecords(from: records, for: scope)
+    }
+
+    func deleteMeeting(_ record: MeetingRecord, scope: MeetingDeletionScope) async {
         guard phase == .idle else { return }
-        let wasLoaded = playbackController.loadedRecordID == record.id
-        if wasLoaded { playbackController.reset() }
+        phase = .cleaning
+        statusDetail = "Movendo arquivos para a Lixeira…"
+        defer { phase = .idle }
         do {
-            try await meetingFileService.moveToTrash(record)
-            removeFromHistory(record)
+            try await moveMeetingContentToTrash(record, scope: scope)
         } catch MeetingFileError.folderMissing {
-            if wasLoaded { playbackController.load(record) }
             meetingManagementRequest = .removeOrphan(record)
         } catch {
-            if wasLoaded { playbackController.load(record) }
             meetingManagementRequest = nil
             errorMessage = error.localizedDescription
         }
+    }
+
+    func cleanOldestMeetings(
+        count: Int,
+        scope: MeetingDeletionScope
+    ) async -> (cleaned: Int, failed: Int) {
+        guard phase == .idle, count > 0 else { return (0, 0) }
+        let targets = Array(eligibleRecords(for: scope).prefix(count))
+        guard !targets.isEmpty else { return (0, 0) }
+
+        phase = .cleaning
+        var cleaned = 0
+        var failed = 0
+        for (index, record) in targets.enumerated() {
+            statusDetail = "Limpando reunião \(index + 1) de \(targets.count)…"
+            do {
+                try await moveMeetingContentToTrash(record, scope: scope)
+                cleaned += 1
+            } catch {
+                failed += 1
+            }
+        }
+        phase = .idle
+        statusDetail = failed == 0
+            ? "Limpeza concluída."
+            : "Limpeza concluída com \(failed) falha(s)."
+        return (cleaned, failed)
     }
 
     func removeOrphanedMeeting(_ record: MeetingRecord) {
@@ -699,6 +755,7 @@ final class AppModel: ObservableObject {
             await notificationService.notifyTranscriptionFinished(for: record, succeeded: false)
         }
         phase = .idle
+        await refreshMeetingDiskUsage(for: record)
         if shouldGenerateSummary {
             await generateSummary(for: record, overwrite: false)
         }
@@ -736,6 +793,7 @@ final class AppModel: ObservableObject {
             var updated = meetingStore.records.first(where: { $0.id == record.id }) ?? record
             updated.summaryPath = url.path
             meetingStore.upsert(updated)
+            await refreshMeetingDiskUsage(for: updated)
             summaryRevision += 1
             progress = 1
             statusDetail = "Resumo salvo em resumo.md."
@@ -799,6 +857,7 @@ final class AppModel: ObservableObject {
         let recordsBeforeRemoval = meetingStore.records
         let removedIndex = recordsBeforeRemoval.firstIndex(where: { $0.id == record.id }) ?? 0
         meetingStore.remove(record)
+        meetingDiskUsage.removeValue(forKey: record.id)
         meetingManagementRequest = nil
 
         guard selectedRecordID == record.id else { return }
@@ -808,6 +867,50 @@ final class AppModel: ObservableObject {
         } else {
             selectedRecordID = remaining[min(removedIndex, remaining.count - 1)].id
         }
+    }
+
+    private func moveMeetingContentToTrash(
+        _ record: MeetingRecord,
+        scope: MeetingDeletionScope
+    ) async throws {
+        let wasLoaded = playbackController.loadedRecordID == record.id
+        if wasLoaded, scope != .text { playbackController.reset() }
+        do {
+            if let updated = try await meetingFileService.moveToTrash(record, scope: scope) {
+                meetingStore.upsert(updated)
+                await refreshMeetingDiskUsage(for: updated)
+                meetingManagementRequest = nil
+                if selectedRecordID == updated.id {
+                    playbackController.load(updated)
+                }
+            } else {
+                removeFromHistory(record)
+            }
+        } catch {
+            await refreshMeetingDiskUsage(for: record)
+            if wasLoaded { playbackController.load(record) }
+            throw error
+        }
+    }
+
+    private func refreshMeetingDiskUsage() async {
+        let folders = records.map { ($0.id, $0.folderURL) }
+        let calculated = await Task.detached(priority: .utility) {
+            Dictionary(uniqueKeysWithValues: folders.map {
+                ($0.0, MeetingFileService.diskUsage(at: $0.1))
+            })
+        }.value
+        let currentIDs = Set(records.map(\.id))
+        let latest = meetingDiskUsage.filter { currentIDs.contains($0.key) }
+        meetingDiskUsage = calculated.filter { currentIDs.contains($0.key) }
+            .merging(latest) { _, latest in latest }
+    }
+
+    private func refreshMeetingDiskUsage(for record: MeetingRecord) async {
+        let bytes = await Task.detached(priority: .utility) {
+            MeetingFileService.diskUsage(at: record.folderURL)
+        }.value
+        meetingDiskUsage[record.id] = bytes
     }
 
     private func fail(_ error: Error) {
@@ -913,6 +1016,7 @@ final class AppModel: ObservableObject {
             microphoneName: "Discord · \(result.guildName) / #\(result.channelName)"
         )
         meetingStore.upsert(record)
+        await refreshMeetingDiskUsage(for: record)
         selectedRecordID = record.id
         clearActiveRecording()
         await transcribe(&record)
