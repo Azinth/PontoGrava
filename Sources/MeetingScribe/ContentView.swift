@@ -369,10 +369,7 @@ private struct SidebarSettings: View {
 
     private var appVersion: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
-        guard let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String else {
-            return "Versão \(version)"
-        }
-        return "Versão \(version) (\(build))"
+        return "Versão \(version)"
     }
 }
 
