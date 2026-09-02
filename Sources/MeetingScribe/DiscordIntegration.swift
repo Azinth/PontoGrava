@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Security
 
@@ -99,6 +100,24 @@ struct DiscordCaptureResult: Codable {
     let folderPath: String
     let audioPath: String
     let manifestPath: String
+}
+
+struct DiscordPublicationResult: Codable, Equatable {
+    let textChannelId: String
+    let messageId: String
+}
+
+enum DiscordPublicationFingerprint {
+    static func make(transcriptURL: URL, summaryURL: URL?) throws -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data("transcript\0".utf8))
+        hasher.update(data: try Data(contentsOf: transcriptURL))
+        hasher.update(data: Data("\0summary\0".utf8))
+        if let summaryURL {
+            hasher.update(data: try Data(contentsOf: summaryURL))
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
 }
 
 struct DiscordManifest: Codable {
@@ -237,6 +256,35 @@ final class DiscordBotClient {
         try decode(
             DiscordCaptureResult.self,
             from: await send(command: "recover", values: ["folderPath": folder.path])
+        )
+    }
+
+    func publish(
+        manifest: DiscordManifest,
+        title: String,
+        createdAt: Date,
+        transcriptURL: URL,
+        summaryURL: URL?,
+        textChannelID: String?,
+        messageID: String?
+    ) async throws -> DiscordPublicationResult {
+        var values: [String: Any] = [
+            "guildId": manifest.guildId,
+            "voiceChannelId": manifest.channelId,
+            "title": title,
+            "createdAt": ISO8601DateFormatter().string(from: createdAt),
+            "transcriptPath": transcriptURL.path
+        ]
+        if let summaryURL { values["summaryPath"] = summaryURL.path }
+        if let textChannelID {
+            values["textChannelId"] = textChannelID
+        }
+        if let messageID {
+            values["messageId"] = messageID
+        }
+        return try decode(
+            DiscordPublicationResult.self,
+            from: await send(command: "publishMeeting", values: values)
         )
     }
 

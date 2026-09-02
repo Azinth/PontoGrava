@@ -113,10 +113,12 @@ enum SummaryChecks {
         check(settings.transcriptionProvider == .local, "transcription defaults local")
         check(settings.summaryProvider == .local, "summary defaults local")
         check(!settings.automaticallyGenerateSummary, "automatic summary defaults off")
+        check(!settings.automaticallyPublishDiscordMeetings, "automatic Discord publication defaults off")
         check(!settings.usesCustomSummaryPrompt, "custom prompt defaults off")
         check(settings.customSummaryPrompt.isEmpty, "custom prompt defaults empty")
         check(settings.activeCustomSummaryPrompt == nil, "custom prompt inactive by default")
         settings.automaticallyGenerateSummary = true
+        settings.automaticallyPublishDiscordMeetings = true
         settings.usesCustomSummaryPrompt = true
         settings.customSummaryPrompt = "Liste riscos e bloqueios."
 
@@ -141,6 +143,10 @@ enum SummaryChecks {
         check(
             AppSettings(defaults: defaults).automaticallyGenerateSummary,
             "automatic summary setting persists"
+        )
+        check(
+            AppSettings(defaults: defaults).automaticallyPublishDiscordMeetings,
+            "automatic Discord publication setting persists"
         )
         let restoredSettings = AppSettings(defaults: defaults)
         check(restoredSettings.appearance == .system, "appearance setting persists")

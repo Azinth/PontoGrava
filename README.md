@@ -11,6 +11,7 @@ provedor opcional de transcrição e resumos.
 
 - Captura simultânea do áudio do sistema e do microfone.
 - Gravação de canais do Discord com identificação dos participantes.
+- Publicação opcional da transcrição e do resumo em um canal de texto correspondente.
 - Soundwave e cronômetro em tempo real.
 - Transcrição com WhisperKit local ou OpenAI e seleção de idioma.
 - Resumo editável com Apple Intelligence local ou OpenAI.
@@ -148,8 +149,11 @@ O PontoGrava procura os executáveis em `/opt/homebrew/bin` e `/usr/local/bin`.
 2. Abra a seção **Bot**, crie o bot e copie o **Token**. A **Public Key** não funciona como token.
 3. No PontoGrava, selecione **Discord**, cole o token e clique em **Salvar e conectar**.
 4. Use o link de convite exibido pelo app para adicionar o bot ao servidor e autorizar os comandos `/start` e `/stop`.
-5. Autorize as permissões **Ver canais**, **Conectar** e **Enviar mensagens**. Os membros também precisam poder **Usar comandos de aplicativos** no canal.
+5. Autorize as permissões **Ver canais**, **Conectar**, **Enviar mensagens**, **Anexar arquivos**, **Ler histórico de mensagens** e **Gerenciar canais**. Os membros também precisam poder **Usar comandos de aplicativos** no canal.
 6. Escolha o servidor e o canal de voz e clique em **Gravar canal do Discord** ou use `/start` no chat integrado do canal de voz em que você está.
+
+Bots convidados por versões anteriores precisam ser autorizados novamente pelo
+link exibido no PontoGrava para receber as novas permissões.
 
 A gravação termina pelo botão do app, ao perder a conexão ou depois que o bot
 fica sozinho por 60 segundos. Se o app for interrompido, ele oferece a
@@ -164,6 +168,21 @@ comandos.
 O provedor escolhido transcreve o `audio.wav` combinado. As faixas individuais
 alinhadas são usadas somente para associar cada trecho ao participante registrado
 no manifesto do Discord.
+
+### Publicar transcrição e resumo no Discord
+
+Em **Ajustes → Discord**, ative **Publicar reuniões automaticamente** para enviar
+a transcrição ao terminar o processamento. O PontoGrava cria um canal de texto
+com o prefixo `pontograva-` na mesma categoria da sala de voz. Por exemplo,
+`Reunião 1` usa `pontograva-reuniao-1`. Reuniões seguintes da mesma sala são
+publicadas nesse mesmo canal; outra sala recebe outro canal.
+
+O canal de texto acompanha o nome, a categoria e as permissões específicas da
+sala de voz. Quando o resumo fica pronto, a publicação existente é atualizada e
+passa a incluir `transcricao.txt` e `resumo.md`. Com a automação desligada, use
+**Publicar no Discord** na reunião; depois do primeiro envio, o botão muda para
+**Publicado no Discord** e fica desativado. Uma edição salva na transcrição ou
+no resumo é indicada como alteração pendente e reativa **Atualizar no Discord**.
 
 ## Arquivos e privacidade
 
@@ -207,6 +226,7 @@ completo e abra novamente.
 - Use o token da seção **Bot**, não a Public Key ou o Application ID.
 - Execute `brew install node ffmpeg` e reabra o PontoGrava.
 - Confirme que o bot foi convidado para o servidor e pode ver o canal.
+- Para publicar reuniões, autorize novamente o bot e confirme a permissão **Gerenciar canais**.
 
 ### O bot entra no canal, mas não grava
 

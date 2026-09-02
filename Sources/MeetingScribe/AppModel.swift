@@ -39,6 +39,7 @@ final class AppModel: ObservableObject {
     @Published var notificationPermissionState: NotificationPermissionState = .unknown
     @Published var showNotificationInvitation = false
     @Published private(set) var summaryRevision = 0
+    @Published private(set) var meetingDocumentRevision = 0
     @Published private(set) var summarizingRecordID: UUID?
     @Published private(set) var meetingDiskUsage: [UUID: Int64] = [:]
     @Published private(set) var recordingTimeline = RecordingTimeline()
@@ -150,7 +151,7 @@ final class AppModel: ObservableObject {
 
     var discordInviteURL: URL? {
         guard let discordApplicationID else { return nil }
-        return URL(string: "https://discord.com/oauth2/authorize?client_id=\(discordApplicationID)&scope=bot%20applications.commands&permissions=1051648")
+        return URL(string: "https://discord.com/oauth2/authorize?client_id=\(discordApplicationID)&scope=bot%20applications.commands&permissions=1149968")
     }
 
     func initialize() async {
@@ -162,6 +163,7 @@ final class AppModel: ObservableObject {
         refreshMicrophones()
         detectDiscordRecoverySession()
         restoreSummaryPaths()
+        restoreDiscordPublicationFingerprints()
         Task { [weak self] in await self?.refreshMeetingDiskUsage() }
         if selectedRecordID == nil { selectedRecordID = records.first?.id }
         loadCredentialState()
@@ -376,6 +378,82 @@ final class AppModel: ObservableObject {
 
     func hasSummary(_ record: MeetingRecord) -> Bool {
         FileManager.default.fileExists(atPath: summaryURL(for: record).path)
+    }
+
+    func isDiscordMeeting(_ record: MeetingRecord) -> Bool {
+        (try? DiscordManifest.load(from: record.folderURL)) != nil
+    }
+
+    func hasDiscordPublication(_ record: MeetingRecord) -> Bool {
+        record.discordPublicationChannelID != nil && record.discordPublicationMessageID != nil
+    }
+
+    func discordPublicationState(for record: MeetingRecord) -> DiscordPublicationState {
+        guard isDiscordMeeting(record),
+              let fingerprint = try? discordPublicationFingerprint(for: record) else {
+            return .unavailable
+        }
+        guard hasDiscordPublication(record) else { return .unpublished }
+        return record.discordPublicationFingerprint == fingerprint ? .published : .modified
+    }
+
+    func meetingDocumentDidChange() {
+        meetingDocumentRevision += 1
+    }
+
+    func publishToDiscord(_ record: MeetingRecord) async {
+        guard phase == .idle else { return }
+        let current = meetingStore.records.first(where: { $0.id == record.id }) ?? record
+        guard let transcriptURL = current.transcriptURL,
+              FileManager.default.fileExists(atPath: transcriptURL.path) else {
+            warningMessage = "A transcrição precisa estar pronta antes da publicação no Discord."
+            return
+        }
+        guard let manifest = try? DiscordManifest.load(from: current.folderURL) else {
+            warningMessage = "Esta reunião não possui os dados do canal de voz do Discord."
+            return
+        }
+        guard discordConnected else {
+            warningMessage = "Conecte o bot ao Discord antes de publicar a reunião."
+            return
+        }
+
+        warningMessage = nil
+        phase = .publishing
+        progress = 0.1
+        statusDetail = hasDiscordPublication(current)
+            ? "Atualizando a publicação no Discord…"
+            : "Preparando a publicação no Discord…"
+        defer { phase = .idle }
+        do {
+            let candidateSummaryURL = summaryURL(for: current)
+            let existingSummaryURL = FileManager.default.fileExists(atPath: candidateSummaryURL.path)
+                ? candidateSummaryURL
+                : nil
+            let fingerprint = try DiscordPublicationFingerprint.make(
+                transcriptURL: transcriptURL,
+                summaryURL: existingSummaryURL
+            )
+            let result = try await discordBotClient.publish(
+                manifest: manifest,
+                title: current.title,
+                createdAt: current.createdAt,
+                transcriptURL: transcriptURL,
+                summaryURL: existingSummaryURL,
+                textChannelID: current.discordPublicationChannelID,
+                messageID: current.discordPublicationMessageID
+            )
+            var updated = meetingStore.records.first(where: { $0.id == current.id }) ?? current
+            updated.discordPublicationChannelID = result.textChannelId
+            updated.discordPublicationMessageID = result.messageId
+            updated.discordPublicationFingerprint = fingerprint
+            meetingStore.upsert(updated)
+            progress = 1
+            statusDetail = "Reunião publicada no Discord."
+        } catch {
+            warningMessage = "Os arquivos locais foram preservados, mas a publicação no Discord falhou: \(error.localizedDescription)"
+            statusDetail = "Você pode tentar publicar novamente pela reunião."
+        }
     }
 
     func chooseOutputFolder() {
@@ -709,6 +787,7 @@ final class AppModel: ObservableObject {
         let apiKey = provider == .openAI ? OpenAITokenStore.load() : nil
         statusDetail = provider == .local ? "Preparando o Whisper local…" : "Preparando a transcrição pela OpenAI…"
         var shouldGenerateSummary = false
+        var transcriptionSucceeded = false
         do {
             let reportProgress: @Sendable (Double, String) -> Void = { [weak self] value, detail in
                 Task { @MainActor in
@@ -746,6 +825,7 @@ final class AppModel: ObservableObject {
             statusDetail = "WAV e transcrição salvos."
             await notificationService.notifyTranscriptionFinished(for: record, succeeded: true)
             shouldGenerateSummary = settings.automaticallyGenerateSummary && record.summaryPath == nil
+            transcriptionSucceeded = true
         } catch {
             record.status = .failed
             record.errorMessage = error.localizedDescription
@@ -756,6 +836,11 @@ final class AppModel: ObservableObject {
         }
         phase = .idle
         await refreshMeetingDiskUsage(for: record)
+        if transcriptionSucceeded,
+           settings.automaticallyPublishDiscordMeetings,
+           isDiscordMeeting(record) {
+            await publishToDiscord(record)
+        }
         if shouldGenerateSummary {
             await generateSummary(for: record, overwrite: false)
         }
@@ -769,10 +854,7 @@ final class AppModel: ObservableObject {
         let provider = settings.summaryProvider
         let apiKey = provider == .openAI ? OpenAITokenStore.load() : nil
         statusDetail = provider == .local ? "Preparando o resumo local…" : "Preparando o resumo pela OpenAI…"
-        defer {
-            summarizingRecordID = nil
-            phase = .idle
-        }
+        var publicationUpdate: MeetingRecord?
 
         do {
             let reportProgress: @Sendable (Double, String) -> Void = { [weak self] value, detail in
@@ -797,9 +879,18 @@ final class AppModel: ObservableObject {
             summaryRevision += 1
             progress = 1
             statusDetail = "Resumo salvo em resumo.md."
+            if isDiscordMeeting(updated),
+               settings.automaticallyPublishDiscordMeetings || hasDiscordPublication(updated) {
+                publicationUpdate = updated
+            }
         } catch {
             warningMessage = "A transcrição foi preservada, mas o resumo não pôde ser gerado: \(error.localizedDescription)"
             statusDetail = "Transcrição preservada. Você pode tentar gerar o resumo novamente."
+        }
+        summarizingRecordID = nil
+        phase = .idle
+        if let publicationUpdate {
+            await publishToDiscord(publicationUpdate)
         }
     }
 
@@ -815,6 +906,30 @@ final class AppModel: ObservableObject {
             updated.summaryPath = url.path
             meetingStore.upsert(updated)
         }
+    }
+
+    private func restoreDiscordPublicationFingerprints() {
+        for record in records where hasDiscordPublication(record)
+            && record.discordPublicationFingerprint == nil {
+            guard let fingerprint = try? discordPublicationFingerprint(for: record) else { continue }
+            var updated = record
+            updated.discordPublicationFingerprint = fingerprint
+            meetingStore.upsert(updated)
+        }
+    }
+
+    private func discordPublicationFingerprint(for record: MeetingRecord) throws -> String {
+        guard let transcriptURL = record.transcriptURL,
+              FileManager.default.fileExists(atPath: transcriptURL.path) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        let candidateSummaryURL = summaryURL(for: record)
+        return try DiscordPublicationFingerprint.make(
+            transcriptURL: transcriptURL,
+            summaryURL: FileManager.default.fileExists(atPath: candidateSummaryURL.path)
+                ? candidateSummaryURL
+                : nil
+        )
     }
 
     private func uniqueMeetingFolder(for date: Date, imported: Bool) -> URL {

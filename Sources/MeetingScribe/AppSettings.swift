@@ -70,6 +70,15 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(automaticallyGenerateSummary, forKey: Keys.automaticallyGenerateSummary) }
     }
 
+    @Published var automaticallyPublishDiscordMeetings: Bool {
+        didSet {
+            defaults.set(
+                automaticallyPublishDiscordMeetings,
+                forKey: Keys.automaticallyPublishDiscordMeetings
+            )
+        }
+    }
+
     @Published var usesCustomSummaryPrompt: Bool {
         didSet { defaults.set(usesCustomSummaryPrompt, forKey: Keys.usesCustomSummaryPrompt) }
     }
@@ -107,6 +116,9 @@ final class AppSettings: ObservableObject {
         hasCompletedOnboarding = defaults.bool(forKey: Keys.hasCompletedOnboarding)
         hasSeenNotificationInvitation = defaults.bool(forKey: Keys.hasSeenNotificationInvitation)
         automaticallyGenerateSummary = defaults.bool(forKey: Keys.automaticallyGenerateSummary)
+        automaticallyPublishDiscordMeetings = defaults.bool(
+            forKey: Keys.automaticallyPublishDiscordMeetings
+        )
         usesCustomSummaryPrompt = defaults.bool(forKey: Keys.usesCustomSummaryPrompt)
         customSummaryPrompt = defaults.string(forKey: Keys.customSummaryPrompt) ?? ""
     }
@@ -140,6 +152,7 @@ final class AppSettings: ObservableObject {
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let hasSeenNotificationInvitation = "hasSeenNotificationInvitation"
         static let automaticallyGenerateSummary = "automaticallyGenerateSummary"
+        static let automaticallyPublishDiscordMeetings = "automaticallyPublishDiscordMeetings"
         static let usesCustomSummaryPrompt = "usesCustomSummaryPrompt"
         static let customSummaryPrompt = "customSummaryPrompt"
     }

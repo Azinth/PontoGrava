@@ -58,6 +58,9 @@ enum MeetingManagementCheck {
         let legacyData = try JSONEncoder().encode(legacy)
         let migrated = try JSONDecoder().decode(MeetingRecord.self, from: legacyData)
         check(migrated.summaryPath == nil, "legacy history decodes without summary path")
+        check(migrated.discordPublicationChannelID == nil, "legacy history decodes without Discord channel")
+        check(migrated.discordPublicationMessageID == nil, "legacy history decodes without Discord message")
+        check(migrated.discordPublicationFingerprint == nil, "legacy history decodes without Discord fingerprint")
 
         let collision = root.appendingPathComponent("Existente", isDirectory: true)
         try FileManager.default.createDirectory(at: collision, withIntermediateDirectories: true)

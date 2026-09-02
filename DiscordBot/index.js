@@ -14,6 +14,7 @@ import {
   GatewayIntentBits
 } from 'discord.js';
 import prism from 'prism-media';
+import { publishMeeting } from './publication.js';
 import {
   AudioLevelReporter,
   SpeakerCaptureCoordinator,
@@ -447,6 +448,7 @@ async function handle(command) {
     writeJSONAtomic(join(command.folderPath, '.discord', 'session.json'), session);
     return finalizeOnce(command.folderPath);
   }
+  case 'publishMeeting': return publishMeeting(client, command);
   default: throw new Error(`Comando desconhecido: ${command.command}`);
   }
 }

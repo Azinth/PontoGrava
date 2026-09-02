@@ -42,6 +42,27 @@ enum DiscordIntegrationCheck {
             DiscordStartRequest.self,
             from: Data(#"{"requestId":"request","guildId":"guild","channelId":"channel"}"#.utf8)
         )
+        let publication = try JSONDecoder().decode(
+            DiscordPublicationResult.self,
+            from: Data(#"{"textChannelId":"text","messageId":"message"}"#.utf8)
+        )
+        let transcriptURL = root.appendingPathComponent("transcricao.txt")
+        let summaryURL = root.appendingPathComponent("resumo.md")
+        try Data("Transcrição inicial".utf8).write(to: transcriptURL)
+        try Data("Resumo inicial".utf8).write(to: summaryURL)
+        let transcriptOnlyFingerprint = try DiscordPublicationFingerprint.make(
+            transcriptURL: transcriptURL,
+            summaryURL: nil
+        )
+        let completeFingerprint = try DiscordPublicationFingerprint.make(
+            transcriptURL: transcriptURL,
+            summaryURL: summaryURL
+        )
+        try Data("Resumo alterado".utf8).write(to: summaryURL)
+        let modifiedFingerprint = try DiscordPublicationFingerprint.make(
+            transcriptURL: transcriptURL,
+            summaryURL: summaryURL
+        )
         guard manifest.channelName == "Geral",
               manifest.participants.first?.displayName == "Ana",
               manifest.captureDiagnostics?.participants.first?.automaticRestarts == 1,
@@ -51,7 +72,13 @@ enum DiscordIntegrationCheck {
                 requestId: "request",
                 guildId: "guild",
                 channelId: "channel"
-              ) else {
+              ),
+              publication == DiscordPublicationResult(
+                textChannelId: "text",
+                messageId: "message"
+              ),
+              transcriptOnlyFingerprint != completeFingerprint,
+              completeFingerprint != modifiedFingerprint else {
             throw CheckError.failed
         }
 

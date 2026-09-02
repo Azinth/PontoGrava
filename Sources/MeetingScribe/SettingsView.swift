@@ -22,6 +22,9 @@ struct AppSettingsView: View {
             AISettingsPane()
                 .tabItem { Label("Inteligência Artificial", systemImage: "sparkles") }
 
+            DiscordSettingsPane()
+                .tabItem { Label("Discord", systemImage: "bubble.left.and.bubble.right") }
+
             CleanupSettingsPane()
                 .tabItem { Label("Limpeza", systemImage: "trash") }
         }
@@ -29,6 +32,56 @@ struct AppSettingsView: View {
         .environmentObject(settings)
         .frame(width: 580, height: 430)
         .preferredColorScheme(settings.appearance.colorScheme)
+    }
+}
+
+private struct DiscordSettingsPane: View {
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        Form {
+            Section("Publicação das reuniões") {
+                Toggle(
+                    "Publicar reuniões automaticamente",
+                    isOn: $settings.automaticallyPublishDiscordMeetings
+                )
+                .disabled(model.isBusy)
+
+                Text(
+                    "Ao terminar uma gravação do Discord, o PontoGrava cria ou reutiliza um canal de texto correspondente à sala de voz e publica a transcrição. Quando o resumo ficar pronto, a mesma publicação será atualizada."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Section("Permissões do bot") {
+                Label(
+                    "O bot precisa poder ver canais, conectar, enviar mensagens, anexar arquivos, ler o histórico e gerenciar canais.",
+                    systemImage: "lock.shield"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if let inviteURL = model.discordInviteURL {
+                    Link("Autorizar novamente ou adicionar a outro servidor", destination: inviteURL)
+                } else {
+                    Text("Conecte o bot para gerar o link com as novas permissões.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Privacidade") {
+                Text(
+                    "O canal de texto permanece na mesma categoria e recebe as mesmas permissões específicas da sala de voz antes de cada publicação."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(.top, 12)
     }
 }
 
