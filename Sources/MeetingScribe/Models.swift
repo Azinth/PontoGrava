@@ -50,11 +50,21 @@ struct MeetingRecord: Identifiable, Codable, Hashable {
     var status: MeetingStatus
     var errorMessage: String?
     var microphoneName: String
+    var discordPublicationChannelID: String? = nil
+    var discordPublicationMessageID: String? = nil
+    var discordPublicationFingerprint: String? = nil
 
     var folderURL: URL { URL(fileURLWithPath: folderPath) }
     var audioURL: URL { URL(fileURLWithPath: audioPath) }
     var transcriptURL: URL? { transcriptPath.map(URL.init(fileURLWithPath:)) }
     var summaryURL: URL? { summaryPath.map(URL.init(fileURLWithPath:)) }
+}
+
+enum DiscordPublicationState: Equatable {
+    case unavailable
+    case unpublished
+    case published
+    case modified
 }
 
 struct AudioInputDevice: Identifiable, Hashable {
@@ -71,6 +81,7 @@ enum AppPhase: Equatable {
     case finalizing
     case transcribing
     case summarizing
+    case publishing
     case cleaning
 
     var title: String {
@@ -82,6 +93,7 @@ enum AppPhase: Equatable {
         case .finalizing: "Finalizando o WAV"
         case .transcribing: "Transcrevendo"
         case .summarizing: "Gerando resumo"
+        case .publishing: "Publicando no Discord"
         case .cleaning: "Limpando reuniões"
         }
     }

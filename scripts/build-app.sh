@@ -36,7 +36,8 @@ cp "$BIN_PATH/PontoGrava" "$APP/Contents/MacOS/PontoGrava"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources/DiscordBot"
 cp "$ROOT/DiscordBot/index.js" "$ROOT/DiscordBot/audio.js" \
-  "$ROOT/DiscordBot/package.json" "$ROOT/DiscordBot/package-lock.json" \
+  "$ROOT/DiscordBot/publication.js" "$ROOT/DiscordBot/package.json" \
+  "$ROOT/DiscordBot/package-lock.json" \
   "$APP/Contents/Resources/DiscordBot/"
 cp -R "$ROOT/DiscordBot/node_modules" "$APP/Contents/Resources/DiscordBot/"
 chmod +x "$APP/Contents/MacOS/PontoGrava"

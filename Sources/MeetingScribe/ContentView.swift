@@ -208,7 +208,7 @@ private struct AppStatusPill: View {
     private var icon: String {
         switch model.phase {
         case .idle: "checkmark.circle.fill"
-        case .preparing, .finalizing, .transcribing, .summarizing, .cleaning: "hourglass"
+        case .preparing, .finalizing, .transcribing, .summarizing, .publishing, .cleaning: "hourglass"
         case .recording: "record.circle.fill"
         case .paused: "pause.circle.fill"
         }
@@ -217,7 +217,7 @@ private struct AppStatusPill: View {
     private var color: Color {
         switch model.phase {
         case .idle: .green
-        case .preparing, .finalizing, .transcribing, .summarizing, .cleaning: .blue
+        case .preparing, .finalizing, .transcribing, .summarizing, .publishing, .cleaning: .blue
         case .recording: .red
         case .paused: .orange
         }
@@ -661,9 +661,9 @@ private struct RecorderPanel: View {
                 }
             }
 
-            if model.phase == .preparing || model.phase == .finalizing || model.phase == .transcribing || model.phase == .summarizing {
+            if model.phase == .preparing || model.phase == .finalizing || model.phase == .transcribing || model.phase == .summarizing || model.phase == .publishing {
                 VStack(alignment: .leading, spacing: 5) {
-                    ProgressView(value: model.phase == .transcribing || model.phase == .summarizing ? model.progress : nil)
+                    ProgressView(value: model.phase == .transcribing || model.phase == .summarizing || model.phase == .publishing ? model.progress : nil)
                     Text(model.statusDetail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -797,9 +797,9 @@ private struct RecorderPanel: View {
 
             recordingControls
 
-            if model.phase == .preparing || model.phase == .finalizing || model.phase == .transcribing || model.phase == .summarizing {
+            if model.phase == .preparing || model.phase == .finalizing || model.phase == .transcribing || model.phase == .summarizing || model.phase == .publishing {
                 VStack(alignment: .leading, spacing: 7) {
-                    ProgressView(value: model.phase == .transcribing || model.phase == .summarizing ? model.progress : nil)
+                    ProgressView(value: model.phase == .transcribing || model.phase == .summarizing || model.phase == .publishing ? model.progress : nil)
                     Text(model.statusDetail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1086,7 +1086,7 @@ private struct MainLiveWaveformView: View {
         switch phase {
         case .recording: max(0.1, CGFloat(level))
         case .paused: 0.18
-        case .preparing, .finalizing, .transcribing, .summarizing, .cleaning: 0.22
+        case .preparing, .finalizing, .transcribing, .summarizing, .publishing, .cleaning: 0.22
         case .idle: 0.3
         }
     }
@@ -1095,7 +1095,7 @@ private struct MainLiveWaveformView: View {
         switch phase {
         case .recording: .red
         case .paused: .orange
-        case .preparing, .finalizing, .transcribing, .summarizing, .cleaning: .blue
+        case .preparing, .finalizing, .transcribing, .summarizing, .publishing, .cleaning: .blue
         case .idle: .secondary.opacity(0.28)
         }
     }
@@ -1284,6 +1284,26 @@ private struct MeetingDetailView: View {
                             || !model.hasTranscript(in: record)
                     )
 
+                    if model.isDiscordMeeting(record) {
+                        let publicationState = model.discordPublicationState(for: record)
+                        Button {
+                            Task { await model.publishToDiscord(record) }
+                        } label: {
+                            Label(
+                                discordPublicationButtonTitle(publicationState),
+                                systemImage: discordPublicationButtonIcon(publicationState)
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(
+                            model.isBusy
+                                || !model.hasTranscript(in: record)
+                                || !model.discordConnected
+                                || publicationState == .published
+                                || publicationState == .unavailable
+                        )
+                    }
+
                     Spacer()
                     meetingActions(record)
                 }
@@ -1304,6 +1324,7 @@ private struct MeetingDetailView: View {
             Label("\(model.formattedDiskUsage(for: record)) no disco", systemImage: "internaldrive")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            discordPublicationStatus(record)
         }
     }
 
@@ -1323,6 +1344,21 @@ private struct MeetingDetailView: View {
                 model.isBusy
                     || !model.hasTranscript(in: record)
             )
+            if model.isDiscordMeeting(record) {
+                let publicationState = model.discordPublicationState(for: record)
+                Button(
+                    discordPublicationButtonTitle(publicationState)
+                ) {
+                    Task { await model.publishToDiscord(record) }
+                }
+                .disabled(
+                    model.isBusy
+                        || !model.hasTranscript(in: record)
+                        || !model.discordConnected
+                        || publicationState == .published
+                        || publicationState == .unavailable
+                )
+            }
             Divider()
             Button("Excluir…", role: .destructive) {
                 model.presentDelete(record)
@@ -1333,6 +1369,34 @@ private struct MeetingDetailView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+    }
+
+    private func discordPublicationButtonTitle(_ state: DiscordPublicationState) -> String {
+        switch state {
+        case .published: "Publicado no Discord"
+        case .modified: "Atualizar no Discord"
+        case .unpublished, .unavailable: "Publicar no Discord"
+        }
+    }
+
+    private func discordPublicationButtonIcon(_ state: DiscordPublicationState) -> String {
+        state == .published ? "checkmark.circle.fill" : "paperplane"
+    }
+
+    @ViewBuilder
+    private func discordPublicationStatus(_ record: MeetingRecord) -> some View {
+        switch model.discordPublicationState(for: record) {
+        case .published:
+            Label("Publicado no Discord", systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+        case .modified:
+            Label("Alterações ainda não publicadas", systemImage: "exclamationmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        case .unpublished, .unavailable:
+            EmptyView()
+        }
     }
 }
 
@@ -1419,7 +1483,9 @@ private struct SummaryPreviewView: View {
                         reloadToken: "\(url.path)-\(model.summaryRevision)",
                         unavailableTitle: "Resumo indisponível",
                         savedMessage: "Salvo automaticamente em resumo.md",
-                        accessibilityLabel: "Resumo editável"
+                        accessibilityLabel: "Resumo editável",
+                        isDisabled: model.phase == .publishing,
+                        onSave: model.meetingDocumentDidChange
                     )
                 }
             } else if model.phase == .summarizing, model.summarizingRecordID == record.id {
@@ -1459,6 +1525,7 @@ private struct SummaryPreviewView: View {
 }
 
 private struct TranscriptPreviewView: View {
+    @EnvironmentObject private var model: AppModel
     let record: MeetingRecord
 
     var body: some View {
@@ -1469,7 +1536,9 @@ private struct TranscriptPreviewView: View {
                     reloadToken: "\(url.path)-\(record.status.rawValue)",
                     unavailableTitle: "Transcrição indisponível",
                     savedMessage: "Salvo automaticamente em transcricao.txt",
-                    accessibilityLabel: "Transcrição editável"
+                    accessibilityLabel: "Transcrição editável",
+                    isDisabled: model.phase == .publishing,
+                    onSave: model.meetingDocumentDidChange
                 )
             } else {
                 ContentUnavailableView(
@@ -1489,12 +1558,15 @@ private struct EditableTextFileView: View {
     let unavailableTitle: String
     let savedMessage: String
     let accessibilityLabel: String
+    let isDisabled: Bool
+    let onSave: () -> Void
 
     @State private var text = ""
     @State private var errorMessage: String?
     @State private var saveErrorMessage: String?
     @State private var copied = false
     @State private var lastLoadedText = ""
+    @State private var saveNotificationTask: Task<Void, Never>?
 
     var body: some View {
         Group {
@@ -1537,6 +1609,7 @@ private struct EditableTextFileView: View {
                                 .stroke(.quaternary, lineWidth: 1)
                         }
                         .accessibilityLabel(accessibilityLabel)
+                        .disabled(isDisabled)
 
                     if let saveErrorMessage {
                         Text(saveErrorMessage)
@@ -1550,6 +1623,7 @@ private struct EditableTextFileView: View {
         .onAppear(perform: load)
         .onChange(of: reloadToken) { _, _ in load() }
         .onChange(of: text) { _, newValue in save(newValue) }
+        .onDisappear { saveNotificationTask?.cancel() }
     }
 
     private func load() {
@@ -1572,6 +1646,15 @@ private struct EditableTextFileView: View {
             try value.write(to: url, atomically: true, encoding: .utf8)
             lastLoadedText = value
             saveErrorMessage = nil
+            saveNotificationTask?.cancel()
+            saveNotificationTask = Task {
+                do {
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                } catch {
+                    return
+                }
+                onSave()
+            }
         } catch {
             saveErrorMessage = error.localizedDescription
         }
