@@ -24,6 +24,7 @@ struct ContentView: View {
                 set: { if wide { sidebarVisibility = $0 } }
             )) {
                 AppSidebar()
+                    .frame(minWidth: 240, maxWidth: 300)
                     .navigationSplitViewColumnWidth(min: 240, ideal: 260, max: 300)
                     .toolbar(removing: .sidebarToggle)
             } detail: {
@@ -784,7 +785,7 @@ private struct MeetingDetailView: View {
                     VStack(spacing: 0) {
                     meetingHeader(record, compact: compact)
                     Divider()
-                    AudioPlayerView(controller: model.playbackController)
+                    AudioPlayerView(controller: model.playbackController, compact: geometry.size.width - 40 < 650)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 10)
                     Divider()
@@ -1095,34 +1096,20 @@ private struct TranscriptPreviewView: View {
 
 private struct AudioPlayerView: View {
     @ObservedObject var controller: AudioPlaybackController
+    let compact: Bool
 
     var body: some View {
         Group {
             if controller.isAvailable {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) {
-                        playbackButton
-                        currentTime
-                        positionSlider.frame(minWidth: 180)
-                        duration
-                        playbackRate
-                        volume.frame(width: 100)
-                    }
-                    .frame(minWidth: 650)
-
+                if compact {
                     VStack(spacing: 10) {
-                        HStack(spacing: 10) {
-                            playbackButton
-                            currentTime
-                            positionSlider
-                            duration
-                        }
-                        HStack(spacing: 10) {
-                            playbackRate
-                            Spacer()
-                            volume
-                                .frame(maxWidth: 150)
-                        }
+                        primaryControls
+                        secondaryControls
+                    }
+                } else {
+                    HStack(spacing: 12) {
+                        primaryControls
+                        secondaryControls
                     }
                 }
             } else {
@@ -1131,6 +1118,25 @@ private struct AudioPlayerView: View {
                     .padding(.vertical, 8)
             }
         }
+    }
+
+    private var primaryControls: some View {
+        HStack(spacing: 10) {
+            playbackButton
+            currentTime
+            positionSlider
+            duration
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var secondaryControls: some View {
+        HStack(spacing: 12) {
+            playbackRate
+            Spacer(minLength: 0)
+            volume.frame(width: compact ? 150 : 100)
+        }
+        .frame(maxWidth: compact ? .infinity : 204)
     }
 
     private var playbackButton: some View {
@@ -1171,21 +1177,14 @@ private struct AudioPlayerView: View {
     }
 
     private var playbackRate: some View {
-        Menu {
+        Picker("Velocidade de reprodução", selection: $controller.playbackRate) {
             ForEach(AudioPlaybackController.playbackRates, id: \.self) { rate in
-                Button {
-                    controller.playbackRate = rate
-                } label: {
-                    if controller.playbackRate == rate {
-                        Label(playbackRateLabel(rate), systemImage: "checkmark")
-                    } else { Text(playbackRateLabel(rate)) }
-                }
+                Text(playbackRateLabel(rate)).tag(rate)
             }
-        } label: {
-            Text(playbackRateLabel(controller.playbackRate)).monospacedDigit()
         }
-        .menuStyle(.borderedButton)
-        .fixedSize()
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .frame(width: 80, height: 28)
         .accessibilityLabel("Velocidade de reprodução")
         .accessibilityValue(playbackRateLabel(controller.playbackRate))
         .accessibilityIdentifier("playback.speed")

@@ -36,6 +36,18 @@ abre em 1280 × 800 pt e suporta dimensões a partir de 640 × 560 pt.
   Se o salvamento falhar, o rascunho permanece disponível para nova tentativa.
 - Idioma, resumo automático e notificações ficam nos **Ajustes**, agora redimensionáveis.
 
+<p align="center">
+  <img src="docs/images/pontograva-light-wide.png" width="920" alt="Nova interface ampla no tema claro">
+</p>
+
+<p align="center">
+  <img src="docs/images/pontograva-dark-compact.png" width="460" alt="Leitura e controles no layout compacto, tema escuro">
+</p>
+
+Também disponíveis: [layout amplo escuro](docs/images/pontograva-dark-wide.png) e
+[edição no layout compacto claro](docs/images/pontograva-light-compact-editing.png).
+As capturas usam reuniões fictícias.
+
 ### Barra de menus e painel flutuante
 
 Os controles compartilham os estilos e estados da janela principal, com gravação,

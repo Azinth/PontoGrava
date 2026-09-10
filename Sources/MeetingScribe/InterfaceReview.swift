@@ -91,6 +91,7 @@ enum InterfaceReview {
             while window.isVisible { settle(1) }
             return
         }
+        settle(1)
         let sizes = [CGSize(width: 640, height: 560), CGSize(width: 760, height: 560), CGSize(width: 900, height: 650), CGSize(width: 1280, height: 800), CGSize(width: 1440, height: 900)]
         for appearance in [AppAppearance.light, .dark] {
             settings.appearance = appearance
@@ -102,6 +103,11 @@ enum InterfaceReview {
                 try capture(window, output: output, name: "\(appearance.rawValue)-\(Int(size.width))x\(Int(size.height))")
                 for identifier in ["recording.stop", "playback.speed", "document.edit"] {
                     _ = requireControl(identifier, in: window)
+                }
+                if size.width >= 900 {
+                    let split = splitViews(in: window.contentView!).first { $0.isVertical && $0.arrangedSubviews.count >= 2 }!
+                    let sidebarWidth = split.arrangedSubviews[0].frame.width
+                    precondition(sidebarWidth >= 239 && sidebarWidth <= 301, "Sidebar width outside supported range: \(sidebarWidth)")
                 }
                 let actual = window.contentView!.bounds.size
                 precondition(abs(actual.width - size.width) < 2, "Window refused requested width: \(actual) vs \(size)")
@@ -206,6 +212,10 @@ enum InterfaceReview {
         return match
     }
 
+    private static func splitViews(in view: NSView) -> [NSSplitView] {
+        (view as? NSSplitView).map { [$0] } ?? view.subviews.flatMap { splitViews(in: $0) }
+    }
+
     private static func textViews(in view: NSView) -> [NSTextView] {
         (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap { textViews(in: $0) }
     }
@@ -229,6 +239,9 @@ enum InterfaceReview {
 
     private static func capture(_ window: NSWindow, output: URL, name: String) throws {
         if CommandLine.arguments.contains("--checks-only") { return }
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        settle()
         let capture = Process()
         capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         capture.arguments = ["-x", "-o", "-l", String(window.windowNumber), output.appendingPathComponent("\(name).png").path]
