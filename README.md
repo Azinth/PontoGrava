@@ -21,26 +21,38 @@ provedor opcional de transcrição e resumos.
 
 ## Interface
 
-### Área de trabalho unificada
+### Interface responsiva — v1.6.0
+
+A interface usa tipografia do sistema, cores adaptadas aos temas claro e escuro e
+controles que se reorganizam conforme o espaço disponível. A janela principal
+abre em 1280 × 800 pt e suporta dimensões a partir de 640 × 560 pt.
+
+- Abaixo de 900 pt, o botão **Reuniões** abre o histórico com busca.
+- A faixa de gravação mantém **Parar e transcrever** sempre acessível.
+- Os detalhes de captura aparecem ao lado em espaços amplos ou em uma folha com rolagem.
+- O player adapta seus controles sem interromper a reprodução.
+- Resumos abrem com Markdown formatado; transcrições permitem selecionar e copiar texto.
+- **Editar**, **Concluir edição** e **Copiar texto** preservam os arquivos originais.
+  Se o salvamento falhar, o rascunho permanece disponível para nova tentativa.
+- Idioma, resumo automático e notificações ficam nos **Ajustes**, agora redimensionáveis.
 
 <p align="center">
-  <img src="docs/images/pontograva-main-window.jpeg" width="920" alt="Janela principal do PontoGrava">
+  <img src="docs/images/pontograva-light-wide.png" width="920" alt="Nova interface ampla no tema claro">
 </p>
-
-A janela principal reúne o histórico pesquisável, a configuração da gravação, o
-player e a transcrição editável. Em janelas menores, o gravador vira uma faixa
-compacta no topo e deixa o espaço restante para ouvir e revisar a reunião.
-
-### Barra de menus
 
 <p align="center">
-  <img src="docs/images/pontograva-menu-bar.png" width="920" alt="Controles do PontoGrava na barra de menus">
+  <img src="docs/images/pontograva-dark-compact.png" width="460" alt="Leitura e controles no layout compacto, tema escuro">
 </p>
 
-O popup permite alternar entre gravação no Mac e no Discord sem abrir a janela
-principal. No modo Discord, também é possível escolher o servidor e o canal;
-durante uma gravação, o mesmo painel mostra duração, níveis e ações de
-pausar, continuar ou parar.
+Também disponíveis: [layout amplo escuro](docs/images/pontograva-dark-wide.png) e
+[edição no layout compacto claro](docs/images/pontograva-light-compact-editing.png).
+As capturas usam reuniões fictícias.
+
+### Barra de menus e painel flutuante
+
+Os controles compartilham os estilos e estados da janela principal, com gravação,
+cronômetro e ações compactas. A configuração inicial e os Ajustes permitem rolagem
+para manter as ações acessíveis em janelas menores.
 
 ## Baixar e instalar
 
@@ -82,7 +94,7 @@ PontoGrava novamente.
 ## Gravar uma reunião no Mac
 
 1. Abra o PontoGrava e selecione o modo **Mac**.
-2. Escolha o microfone e o idioma da transcrição.
+2. Escolha o microfone nos detalhes de captura e o idioma da transcrição nos **Ajustes**.
 3. Clique em **Iniciar gravação**.
 4. Use **Pausar** quando necessário ou **Parar e transcrever** ao terminar.
 

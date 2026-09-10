@@ -1185,3 +1185,22 @@ final class AppModel: ObservableObject {
         }.map(DiscordRecoveryRequest.init(folder:))
     }
 }
+
+#if DEBUG
+extension AppModel {
+    /// Presentation fixtures for the explicit, isolated interface review command.
+    func configureInterfaceReview(discord: Bool, phase: AppPhase) {
+        activeDiscordRecording = discord
+        recordingMode = discord ? .discord : .mac
+        self.phase = phase
+        statusDetail = phase == .recording ? "Gravando a conversa da equipe." : phase.title
+        progress = 0.42
+        discordParticipants = ["Ana Costa", "Bruno Silva", "Carla Santos", "Daniel Oliveira", "Elisa Souza", "Felipe Lima"]
+        systemAudioLevel = 0.48
+        microphoneAudioLevel = 0.34
+        discordAudioLevel = 0.58
+        recordingTimeline.start(at: Date().addingTimeInterval(-386))
+        if phase == .paused { recordingTimeline.pause(at: Date()) }
+    }
+}
+#endif

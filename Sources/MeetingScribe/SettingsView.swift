@@ -30,7 +30,8 @@ struct AppSettingsView: View {
         }
         .environmentObject(model)
         .environmentObject(settings)
-        .frame(width: 580, height: 430)
+        .frame(minWidth: 640, idealWidth: 720, minHeight: 560, idealHeight: 620)
+        .tint(InterfaceStyle.accent)
         .preferredColorScheme(settings.appearance.colorScheme)
     }
 }
@@ -111,6 +112,19 @@ private struct GeneralSettingsPane: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section("Transcrição") {
+                Picker("Idioma", selection: $settings.language) {
+                    ForEach(TranscriptionLanguage.allCases) { language in Text(language.title).tag(language) }
+                }
+                .disabled(model.isBusy)
+                Toggle("Gerar resumo automaticamente", isOn: $settings.automaticallyGenerateSummary)
+                    .disabled(model.isBusy || model.summaryUnavailableMessage != nil)
+                if let message = model.summaryUnavailableMessage {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section("Notificações") { SidebarNotificationControl() }
 
             Section("Arquivos") {
                 LabeledContent("Pasta de destino") {

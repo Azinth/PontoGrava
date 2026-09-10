@@ -1,109 +1,58 @@
 import SwiftUI
 
-private let onboardingAccent = Color(red: 0.79, green: 0.35, blue: 0.21)
+private let onboardingAccent = InterfaceStyle.accent
 
 struct OnboardingView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 20) {
-                Image(systemName: "waveform.and.mic")
-                    .font(.system(size: 42, weight: .medium))
-                    .foregroundStyle(onboardingAccent)
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("PontoGrava")
-                        .font(.system(.largeTitle, design: .serif, weight: .semibold))
-                    Text("Grave, transcreva e revise reuniões com processamento local por padrão.")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    Label("PontoGrava", systemImage: "waveform.and.mic")
+                        .font(.largeTitle.weight(.semibold))
+                        .foregroundStyle(onboardingAccent)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Prepare sua primeira reunião").font(.title2.weight(.semibold))
+                        Text("Grave, transcreva e revise com processamento local por padrão. Autorize os recursos de captura para começar.")
+                            .foregroundStyle(.secondary)
+                    }
+                    PermissionRow(
+                        title: "Microfone", description: "Captura sua voz pelo microfone do Mac, Bluetooth, USB ou fone com fio.",
+                        granted: model.deviceManager.microphonePermissionGranted, required: true, actionTitle: "Autorizar"
+                    ) { Task { await model.requestMicrophonePermission() } }
+                    PermissionRow(
+                        title: "Áudio do sistema", description: "O macOS apresenta esta permissão como gravação de tela e áudio do sistema.",
+                        granted: model.deviceManager.screenPermissionGranted, required: true, actionTitle: "Autorizar"
+                    ) { model.requestScreenPermission() }
+                    PermissionRow(
+                        title: "Notificações", description: "Avisa quando a transcrição estiver pronta ou precisar de atenção.",
+                        granted: model.notificationPermissionState == .authorized, required: false,
+                        actionTitle: model.notificationPermissionState == .denied ? "Abrir Ajustes" : "Autorizar"
+                    ) {
+                        if model.notificationPermissionState == .denied { model.openNotificationSettings() }
+                        else { Task { await model.requestNotificationPermission() } }
+                    }
+                    Label("O processamento local mantém os dados no Mac. A OpenAI pode ser configurada depois, nos Ajustes.", systemImage: "lock.shield")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                Spacer()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Processamento sob seu controle", systemImage: "lock.shield.fill")
-                        .font(.headline)
-                    Text("O Whisper roda neste Mac. Se preferir, você poderá configurar a OpenAI depois nos Ajustes.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(16)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .padding(24)
             }
-            .padding(30)
-            .frame(width: 300)
-            .frame(maxHeight: .infinity, alignment: .leading)
-            .background(onboardingAccent.opacity(0.08))
-
             Divider()
-
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Prepare o aplicativo")
-                        .font(.system(.title, design: .serif, weight: .semibold))
-                    Text("Autorize o necessário para capturar a reunião. Você pode revisar essas permissões depois.")
-                        .foregroundStyle(.secondary)
-                }
-
-                PermissionRow(
-                    title: "Microfone",
-                    description: "Captura sua voz pelo microfone do Mac, Bluetooth, USB ou fone com fio.",
-                    granted: model.deviceManager.microphonePermissionGranted,
-                    required: true,
-                    actionTitle: "Autorizar"
-                ) {
-                    Task { await model.requestMicrophonePermission() }
-                }
-
-                PermissionRow(
-                    title: "Áudio do sistema",
-                    description: "O macOS apresenta esta permissão como gravação de tela e áudio do sistema.",
-                    granted: model.deviceManager.screenPermissionGranted,
-                    required: true,
-                    actionTitle: "Autorizar"
-                ) {
-                    model.requestScreenPermission()
-                }
-
-                PermissionRow(
-                    title: "Notificações",
-                    description: "Avisa quando a transcrição estiver pronta ou precisar ser refeita.",
-                    granted: model.notificationPermissionState == .authorized,
-                    required: false,
-                    actionTitle: model.notificationPermissionState == .denied ? "Abrir Ajustes" : "Autorizar"
-                ) {
-                    if model.notificationPermissionState == .denied {
-                        model.openNotificationSettings()
-                    } else {
-                        Task { await model.requestNotificationPermission() }
-                    }
-                }
-
-                Spacer()
-
-                HStack {
-                    Text("O microfone é necessário para continuar.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Começar") {
-                        model.finishOnboarding()
-                    }
+            HStack(spacing: 16) {
+                Text("Autorize o microfone para continuar.").font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button("Começar") { model.finishOnboarding() }
                     .buttonStyle(.borderedProminent)
                     .tint(onboardingAccent)
                     .controlSize(.large)
                     .disabled(!model.deviceManager.microphonePermissionGranted)
-                }
-            }
-            .padding(30)
+            }.padding(20)
         }
-        .frame(width: 820, height: 560)
+        .frame(minWidth: 480, idealWidth: 580, maxWidth: 600, minHeight: 460, idealHeight: 520)
         .preferredColorScheme(settings.appearance.colorScheme)
-        .onAppear { model.refreshMicrophones() }
     }
 }
 
@@ -124,7 +73,7 @@ private struct PermissionRow: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 7) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(title)
                         .font(.headline)
                     Text(required ? "NECESSÁRIO" : "OPCIONAL")

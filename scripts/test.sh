@@ -119,3 +119,14 @@ export DEVELOPER_DIR="/Library/Developer/CommandLineTools"
   -o "$ROOT/work/tests/ScreenCaptureDiagnosticsCheck"
 
 "$ROOT/work/tests/ScreenCaptureDiagnosticsCheck"
+
+/usr/bin/xcrun swiftc \
+  -parse-as-library \
+  "$ROOT/Sources/MeetingScribe/InterfaceStyle.swift" \
+  "$ROOT/Sources/MeetingScribe/MeetingDocumentView.swift" \
+  "$ROOT/Tests/InterfaceChecks.swift" \
+  -framework AppKit \
+  -framework SwiftUI \
+  -o "$ROOT/work/tests/InterfaceChecks"
+
+"$ROOT/work/tests/InterfaceChecks"

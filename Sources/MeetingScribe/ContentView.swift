@@ -1,23 +1,86 @@
 import AppKit
 import SwiftUI
 
-private let brandAccent = Color(red: 0.79, green: 0.35, blue: 0.21)
+private let brandAccent = InterfaceStyle.accent
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var settings: AppSettings
 
+    @StateObject private var documents: DocumentLibrary
+    @State private var sidebarVisibility = NavigationSplitViewVisibility.all
+    @State private var showingMeetings = false
+    @State private var restoringSelection = false
+
+    init(documents: DocumentLibrary? = nil) {
+        _documents = StateObject(wrappedValue: documents ?? DocumentLibrary())
+    }
+
     var body: some View {
-        NavigationSplitView {
-            AppSidebar()
-                .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 320)
-        } detail: {
-            MainWorkspace()
+        GeometryReader { geometry in
+            let wide = WorkspaceLayout.showsSidebar(width: geometry.size.width)
+            NavigationSplitView(columnVisibility: Binding(
+                get: { wide ? sidebarVisibility : .detailOnly },
+                set: { if wide { sidebarVisibility = $0 } }
+            )) {
+                AppSidebar()
+                    .frame(minWidth: 240, maxWidth: 300)
+                    .navigationSplitViewColumnWidth(min: 240, ideal: 260, max: 300)
+                    .toolbar(removing: .sidebarToggle)
+            } detail: {
+                MainWorkspace()
+                    .toolbar(removing: .sidebarToggle)
+                    .toolbar {
+                        ToolbarItem(placement: .navigation) {
+                            Group {
+                                Button {
+                                    if wide { sidebarVisibility = sidebarVisibility == .all ? .detailOnly : .all }
+                                    else { showingMeetings = true }
+                                } label: {
+                                    Label("Reuniões", systemImage: "sidebar.left")
+                                }
+                                .accessibilityIdentifier("meetings.open")
+                            }
+                        }
+                        ToolbarItem(placement: .primaryAction) {
+                            Button { model.presentImportPanel() } label: {
+                                Label("Importar áudio", systemImage: "square.and.arrow.down")
+                            }
+                            .disabled(model.isBusy)
+                            .help("Importar áudio")
+                        }
+                    }
+            }
+            .navigationSplitViewStyle(.balanced)
+            .toolbar(removing: .sidebarToggle)
         }
-        .navigationSplitViewStyle(.balanced)
+        .environmentObject(documents)
+        .background(UnsavedDocumentProtection(documents: documents).frame(width: 0, height: 0))
+        .sheet(isPresented: $showingMeetings) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Reuniões").font(.headline)
+                    Spacer()
+                    Button("Concluído") { showingMeetings = false }
+                        .keyboardShortcut(.cancelAction)
+                }.padding(16)
+                AppSidebar()
+            }
+            .environmentObject(documents)
+            .frame(width: 420, height: 480)
+            .onChange(of: model.selectedRecordID) { _, _ in showingMeetings = false }
+        }
+        .onChange(of: model.selectedRecordID) { old, _ in
+            if restoringSelection { restoringSelection = false; return }
+            if documents.hasUnsavedChanges {
+                restoringSelection = true
+                model.selectedRecordID = old
+                model.warningMessage = "Salve a edição pendente antes de trocar de reunião."
+            }
+        }
         .tint(brandAccent)
         .preferredColorScheme(settings.appearance.colorScheme)
-        .frame(minWidth: 760, minHeight: 560)
+        .frame(minWidth: WorkspaceLayout.minimumSize.width, minHeight: WorkspaceLayout.minimumSize.height)
         .sheet(item: renameRequest) { record in
             RenameMeetingView(record: record)
                 .environmentObject(model)
@@ -129,6 +192,8 @@ struct ContentView: View {
 private struct AppSidebar: View {
     @EnvironmentObject private var model: AppModel
     @State private var searchText = ""
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @EnvironmentObject private var documents: DocumentLibrary
 
     private var filteredRecords: [MeetingRecord] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -145,7 +210,7 @@ private struct AppSidebar: View {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("PontoGrava")
-                        .font(.system(.title, design: .serif, weight: .semibold))
+                        .font(.system(.title, design: .default, weight: .semibold))
                     Text("Gravação local com transcrição editável")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -162,12 +227,21 @@ private struct AppSidebar: View {
             Text("REUNIÕES")
                 .font(.caption2.weight(.semibold))
                 .tracking(1.1)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
                 .padding(.bottom, 4)
 
-            List(filteredRecords, selection: $model.selectedRecordID) { record in
+            List(filteredRecords, selection: Binding(
+                get: { model.selectedRecordID },
+                set: { id in
+                    guard !documents.hasUnsavedChanges else {
+                        model.warningMessage = "Há uma edição que ainda não pôde ser salva. Tente salvar novamente antes de trocar de reunião."
+                        return
+                    }
+                    model.selectedRecordID = id
+                }
+            )) { record in
                 MeetingRow(record: record)
                     .tag(record.id)
             }
@@ -188,7 +262,7 @@ private struct AppSidebar: View {
             Divider()
             SidebarSettings()
         }
-        .background(.regularMaterial)
+        .background(reduceTransparency ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor)) : AnyShapeStyle(.regularMaterial))
     }
 }
 
@@ -198,7 +272,7 @@ private struct AppStatusPill: View {
     var body: some View {
         Label(model.phase.title, systemImage: icon)
             .font(.caption.weight(.medium))
-            .foregroundStyle(color)
+            .foregroundStyle(.primary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(color.opacity(0.12), in: Capsule())
@@ -252,7 +326,7 @@ private struct MeetingRow: View {
                         .fixedSize()
                 }
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
@@ -314,48 +388,10 @@ private struct SidebarSettings: View {
             .buttonStyle(.bordered)
             .help(model.settings.outputFolderURL.path)
 
-            HStack {
-                Text("Idioma")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Picker("Idioma", selection: Binding(
-                    get: { model.settings.language },
-                    set: { model.settings.language = $0 }
-                )) {
-                    ForEach(TranscriptionLanguage.allCases) { language in
-                        Text(language.title).tag(language)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 150)
-                .disabled(model.isBusy)
-            }
-
-            Toggle(
-                "Gerar resumo automaticamente",
-                isOn: Binding(
-                    get: { model.settings.automaticallyGenerateSummary },
-                    set: { model.settings.automaticallyGenerateSummary = $0 }
-                )
-            )
-            .toggleStyle(.switch)
-            .font(.caption)
-            .disabled(model.isBusy || model.summaryUnavailableMessage != nil)
-            .help("Gera resumo.md após uma nova transcrição sem substituir resumos existentes.")
-
-            if let message = model.summaryUnavailableMessage {
-                Text(message)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            SidebarNotificationControl()
-
             HStack(spacing: 12) {
                 Text(appVersion)
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 SettingsLink {
                     Label("Ajustes", systemImage: "gearshape")
@@ -409,7 +445,7 @@ struct SummaryPromptSettingsView: View {
                 if model.settings.customSummaryPrompt.isEmpty {
                     Text("Exemplo: Crie um resumo em Markdown com os principais tópicos, decisões e próximos passos. Seja breve e preserve os nomes dos participantes.")
                         .font(.body.monospaced())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 14)
                         .allowsHitTesting(false)
@@ -425,7 +461,7 @@ struct SummaryPromptSettingsView: View {
 
             Text("\(model.settings.customSummaryPrompt.count) de \(SummaryPrompt.maximumCustomPromptCharacters) caracteres")
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
 
             Text("Quando desativado, o app usa o formato padrão: o que foi feito, definido e está pendente.")
@@ -445,11 +481,11 @@ struct SummaryPromptSettingsView: View {
             }
         }
         .padding(24)
-        .frame(width: 600, height: 500)
+        .frame(minWidth: 480, idealWidth: 560, maxWidth: 600, minHeight: 460, idealHeight: 500)
     }
 }
 
-private struct SidebarNotificationControl: View {
+struct SidebarNotificationControl: View {
     @EnvironmentObject private var model: AppModel
 
     @ViewBuilder
@@ -475,481 +511,135 @@ private struct SidebarNotificationControl: View {
 
 private struct MainWorkspace: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showingCapture = false
 
     var body: some View {
         GeometryReader { geometry in
-            let compact = geometry.size.width < 840
-
+            let showsDetails = WorkspaceLayout.showsCaptureDetails(size: geometry.size)
             VStack(spacing: 0) {
-                WorkspaceToolbar(compact: compact)
+                RecordingStrip(showDetails: { showingCapture = true }, showsDetails: showsDetails)
                 Divider()
-
-                if compact {
-                    VStack(spacing: 0) {
-                        RecorderPanel(compact: true)
-                            .padding(12)
+                HStack(spacing: 0) {
+                    MeetingDetailView(store: model.meetingStore, selectedRecordID: model.selectedRecordID)
+                    if showsDetails {
                         Divider()
-                        MeetingDetailView(
-                            store: model.meetingStore,
-                            selectedRecordID: model.selectedRecordID,
-                            compact: true
-                        )
-                    }
-                } else {
-                    HSplitView {
-                        ScrollView {
-                            RecorderPanel(compact: false)
-                                .padding(20)
-                        }
-                        .frame(minWidth: 330, idealWidth: 390, maxWidth: 480)
-
-                        MeetingDetailView(
-                            store: model.meetingStore,
-                            selectedRecordID: model.selectedRecordID,
-                            compact: false
-                        )
-                        .frame(minWidth: 500)
+                        ScrollView { CaptureDetails().padding(20) }
+                            .frame(width: 300)
                     }
                 }
+            }
+            .sheet(isPresented: $showingCapture) {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("Detalhes da captura").font(.headline)
+                        Spacer()
+                        Button("Concluído") { showingCapture = false }
+                            .keyboardShortcut(.cancelAction)
+                    }.padding(20)
+                    Divider()
+                    ScrollView { CaptureDetails().padding(20) }
+                }
+                .frame(width: 480, height: 460)
+            }
+            .onChange(of: showsDetails) { _, value in
+                if value { showingCapture = false }
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
-private struct WorkspaceToolbar: View {
+private struct RecordingStrip: View {
     @EnvironmentObject private var model: AppModel
-    let compact: Bool
+    let showDetails: () -> Void
+    let showsDetails: Bool
 
     var body: some View {
-        Group {
-            if compact {
-                HStack(spacing: 12) {
-                    Text("Captura e transcrição")
-                        .font(.system(.title2, design: .serif, weight: .semibold))
-                    Spacer()
-                    Button {
-                        model.presentImportPanel()
-                    } label: {
-                        Label("Importar", systemImage: "square.and.arrow.down")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(model.isBusy)
-                }
-            } else {
-                HStack(spacing: 16) {
-                    toolbarTitle
-                    Spacer()
-                    toolbarActions
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) {
+                status
+                Spacer(minLength: 12)
+                controls
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                status
+                HStack { Spacer(minLength: 0); controls }
             }
         }
-        .padding(.horizontal, compact ? 16 : 22)
-        .padding(.vertical, compact ? 10 : 16)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(.background)
     }
 
-    private var toolbarTitle: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Captura e transcrição")
-                .font(.system(.title, design: .serif, weight: .semibold))
-            Text(toolbarSubtitle)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-    }
-
-    private var toolbarActions: some View {
-        HStack(spacing: 10) {
-            Button {
-                model.presentImportPanel()
-            } label: {
-                Label("Importar áudio", systemImage: "square.and.arrow.down")
+    private var status: some View {
+        HStack(spacing: 12) {
+            Image(systemName: model.isRecordingSession ? (model.isPaused ? "pause.circle.fill" : "record.circle.fill") : "waveform.circle")
+                .font(.title)
+                .foregroundStyle(model.isRecordingSession ? (model.isPaused ? Color.orange : Color.red) : brandAccent)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.phase.title).font(.headline).fixedSize()
+                Text(model.isRecordingSession ? model.recordingSourceName : (model.recordingMode == .discord ? "Captura do Discord" : "Áudio do Mac e microfone"))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .disabled(model.isBusy)
-
-            if model.isRecordingSession {
-                Button(role: .destructive) {
-                    Task { await model.stopRecording() }
-                } label: {
-                    Label("Parar e transcrever", systemImage: "stop.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .controlSize(.large)
-            } else {
-                Button {
-                    Task { await model.beginRecording() }
-                } label: {
-                    Label(
-                        model.recordingMode == .discord ? "Gravar canal" : "Iniciar gravação",
-                        systemImage: "record.circle"
-                    )
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(brandAccent)
-                .controlSize(.large)
-                .disabled(!model.canBeginRecording)
+            if model.isRecordingSession { RecordingTime() }
+            if model.isBusy && !model.isRecordingSession {
+                ProgressView().controlSize(.small).accessibilityLabel(model.statusDetail)
             }
         }
     }
 
-    private var toolbarSubtitle: String {
-        if model.isRecordingSession { return model.statusDetail }
-        if model.recordingMode == .discord { return model.discordConnectionDetail }
-        return "Sistema + \(model.selectedMicrophoneName)"
+    private var controls: some View {
+        HStack(spacing: 12) {
+            if !showsDetails {
+                Button(action: showDetails) {
+                    Label("Captura", systemImage: "slider.horizontal.3")
+                }
+                .help("Configurar origem e ver detalhes da captura")
+                .accessibilityIdentifier("capture.details")
+            }
+            RecordingActions()
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
-private struct RecorderPanel: View {
+struct CaptureDetails: View {
     @EnvironmentObject private var model: AppModel
-    let compact: Bool
-
-    private var combinedLevel: Float {
-        model.isDiscordRecording
-            ? model.discordAudioLevel
-            : max(model.systemAudioLevel, model.microphoneAudioLevel)
-    }
 
     var body: some View {
-        if compact {
-            compactPanel
-        } else {
-            regularPanel
-        }
-    }
-
-    private var compactPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            compactRecorderHeader
-
-            if model.isRecordingSession {
-                MainLiveWaveformView(level: combinedLevel, phase: model.phase)
-                    .frame(height: 46)
-                    .padding(.horizontal, 8)
-                    .background(.quaternary.opacity(0.65), in: RoundedRectangle(cornerRadius: 10))
-
-                if model.isDiscordRecording {
-                    Label(
-                        model.discordParticipants.isEmpty
-                            ? "Aguardando participantes…"
-                            : model.discordParticipants.joined(separator: ", "),
-                        systemImage: "person.2.wave.2"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                } else {
-                    HStack(spacing: 12) {
-                        CompactSourceLevelView(title: "Sistema", level: model.systemAudioLevel)
-                        CompactSourceLevelView(title: "Microfone", level: model.microphoneAudioLevel)
-                    }
-                }
-                recordingControls
-            } else if model.phase == .idle {
-                HStack(alignment: .center, spacing: 12) {
-                    if model.recordingMode == .discord {
-                        DiscordSetupView(compact: true)
-                    } else {
-                        compactMicrophonePicker
-                    }
-
-                    recordingControls
-                        .frame(minWidth: 160, maxWidth: 190)
-                }
-            }
-
-            if model.phase == .preparing || model.phase == .finalizing || model.phase == .transcribing || model.phase == .summarizing || model.phase == .publishing {
-                VStack(alignment: .leading, spacing: 5) {
-                    ProgressView(value: model.phase == .transcribing || model.phase == .summarizing || model.phase == .publishing ? model.progress : nil)
-                    Text(model.statusDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if model.showNotificationInvitation {
-                NotificationInvitationView()
-            }
-        }
-        .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(.quaternary, lineWidth: 1)
-        }
-    }
-
-    private var compactRecorderHeader: some View {
-        HStack(spacing: 10) {
-            Text(model.phase.title)
-                .font(.system(.title2, design: .serif, weight: .semibold))
-
-            Text(model.statusDetail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            Spacer()
-
-            if model.phase == .idle {
-                HStack(spacing: 6) {
-                    Text("Origem")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .fixedSize()
-
-                    Picker("Origem", selection: $model.recordingMode) {
-                        ForEach(RecordingMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 140)
-                    .disabled(model.isBusy)
-                }
-                .fixedSize()
-            }
-
-            if model.isRecordingSession {
-                RecordingClock(timeline: model.recordingTimeline, isPaused: model.isPaused)
-            } else {
-                Text("00:00")
-                    .font(.title3.monospacedDigit().weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var compactMicrophonePicker: some View {
-        HStack(spacing: 8) {
-            Picker("Microfone", selection: $model.selectedMicrophoneID) {
-                ForEach(model.deviceManager.devices) { device in
-                    Text(device.name + (device.isDefault ? " — padrão atual" : ""))
-                        .tag(Optional(device.id))
-                }
-            }
-            .labelsHidden()
-            .frame(maxWidth: .infinity)
-            .disabled(model.isBusy)
-
-            Button {
-                model.refreshMicrophones()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .help("Atualizar microfones")
-            .disabled(model.isBusy)
-        }
-        .accessibilityElement(children: .contain)
-    }
-
-    private var regularPanel: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            recorderHeader
-
-            Picker("Origem", selection: $model.recordingMode) {
-                ForEach(RecordingMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .disabled(model.isBusy)
-
-            if !model.isRecordingSession {
-                if model.recordingMode == .discord {
-                    DiscordSetupView(compact: false)
-                } else {
-                    MicrophonePicker(
-                        manager: model.deviceManager,
-                        selection: $model.selectedMicrophoneID,
-                        disabled: model.isBusy
-                    )
-                }
-            }
-
-            if model.isRecordingSession {
-                MainLiveWaveformView(level: combinedLevel, phase: model.phase)
-                    .frame(height: 138)
-                    .padding(.horizontal, 10)
-                    .background(.quaternary.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
-
-                if model.isDiscordRecording {
-                    Label(
-                        model.discordParticipants.isEmpty
-                            ? "Aguardando participantes falarem…"
-                            : model.discordParticipants.joined(separator: ", "),
-                        systemImage: "person.2.wave.2"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                } else {
-                    HStack(spacing: 12) {
-                        MainSourceLevelView(title: "Sistema", level: model.systemAudioLevel)
-                        MainSourceLevelView(title: "Microfone", level: model.microphoneAudioLevel)
-                    }
-                }
-            }
-
-            recordingControls
-
-            if model.phase == .preparing || model.phase == .finalizing || model.phase == .transcribing || model.phase == .summarizing || model.phase == .publishing {
-                VStack(alignment: .leading, spacing: 7) {
-                    ProgressView(value: model.phase == .transcribing || model.phase == .summarizing || model.phase == .publishing ? model.progress : nil)
-                    Text(model.statusDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if model.showNotificationInvitation {
-                NotificationInvitationView()
-            }
-
-        }
-        .padding(20)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(.quaternary, lineWidth: 1)
-        }
-    }
-
-    private var recorderHeader: some View {
-        HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(model.phase.title)
-                    .font(.system(.title2, design: .serif, weight: .semibold))
-                Text(model.statusDetail)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                Text("Captura").font(.title3.weight(.semibold))
+                Text(model.statusDetail).font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
             if model.isRecordingSession {
-                RecordingClock(timeline: model.recordingTimeline, isPaused: model.isPaused)
+                RecordingMonitor()
             } else {
-                Text("00:00")
-                    .font(.title2.monospacedDigit().weight(.medium))
-                    .foregroundStyle(.secondary)
+                Picker("Origem", selection: $model.recordingMode) {
+                    ForEach(RecordingMode.allCases) { mode in Text(mode.title).tag(mode) }
+                }
+                .pickerStyle(.segmented)
+                .disabled(model.isBusy)
+                if model.recordingMode == .discord {
+                    DiscordSetupView()
+                } else {
+                    MicrophonePicker(manager: model.deviceManager, selection: $model.selectedMicrophoneID, disabled: model.isBusy)
+                }
             }
-        }
-    }
-
-    @ViewBuilder
-    private var recordingControls: some View {
-        HStack(spacing: 10) {
-            if model.isRecordingSession {
-                if model.canPauseRecording {
-                    Button {
-                        model.isPaused ? model.resumeRecording() : model.pauseRecording()
-                    } label: {
-                        Label(
-                            model.isPaused ? "Continuar" : "Pausar",
-                            systemImage: model.isPaused ? "play.fill" : "pause.fill"
-                        )
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .tint(model.isPaused ? .orange : .primary)
-                }
-
-                Button(role: .destructive) {
-                    Task { await model.stopRecording() }
-                } label: {
-                    Label("Parar e transcrever", systemImage: "stop.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .controlSize(.large)
-            } else if model.phase == .idle {
-                Button {
-                    Task { await model.beginRecording() }
-                } label: {
-                    Label(
-                        model.recordingMode == .discord ? "Gravar canal do Discord" : "Iniciar gravação",
-                        systemImage: "record.circle"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(brandAccent)
-                .controlSize(.large)
-                .disabled(!model.canBeginRecording)
+            if model.isBusy && !model.isRecordingSession {
+                ProgressView(value: model.phase == .transcribing || model.phase == .summarizing || model.phase == .publishing ? model.progress : nil)
             }
+            if model.showNotificationInvitation { NotificationInvitationView() }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct DiscordSetupView: View {
     @EnvironmentObject private var model: AppModel
-    let compact: Bool
-
     var body: some View {
-        if compact {
-            compactSetup
-        } else {
-            regularSetup
-        }
-    }
-
-    @ViewBuilder
-    private var compactSetup: some View {
-        if !model.discordHasToken {
-            HStack(spacing: 8) {
-                SecureField("Token do bot", text: $model.discordTokenDraft)
-                    .textFieldStyle(.roundedBorder)
-                Button("Conectar") {
-                    Task { await model.saveDiscordTokenAndConnect() }
-                }
-                .disabled(model.discordTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Link(destination: URL(string: "https://discord.com/developers/applications")!) {
-                    Image(systemName: "questionmark.circle")
-                }
-                .help("Criar bot no Discord")
-                .accessibilityLabel("Criar bot no Discord")
-            }
-        } else {
-            HStack(spacing: 8) {
-                Label(
-                    model.discordConnectionDetail,
-                    systemImage: model.discordConnected ? "checkmark.circle.fill" : "bolt.horizontal.circle"
-                )
-                .labelStyle(.iconOnly)
-                .foregroundStyle(model.discordConnected ? Color.green : Color.secondary)
-                .help(model.discordConnectionDetail)
-
-                if model.discordConnected {
-                    discordGuildPicker
-                        .labelsHidden()
-                    discordChannelPicker
-                        .labelsHidden()
-                }
-
-                Menu {
-                    Button("Reconectar") { Task { await model.connectDiscord() } }
-                    if let inviteURL = model.discordInviteURL {
-                        Link("Convidar o bot para outro servidor", destination: inviteURL)
-                    }
-                    Divider()
-                    Button("Remover token", role: .destructive) { model.removeDiscordToken() }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .menuStyle(.borderlessButton)
-                .help("Opções do Discord")
-            }
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    private var regularSetup: some View {
         VStack(alignment: .leading, spacing: 11) {
             if !model.discordHasToken {
                 SecureField("Token do bot", text: $model.discordTokenDraft)
@@ -1055,96 +745,6 @@ private struct MicrophonePicker: View {
     }
 }
 
-private struct MainLiveWaveformView: View {
-    let level: Float
-    let phase: AppPhase
-
-    private let pattern: [CGFloat] = [
-        0.34, 0.58, 0.42, 0.76, 0.52, 0.95, 0.68, 0.38, 0.84,
-        0.48, 1, 0.62, 0.36, 0.74, 0.44, 0.88, 0.56, 0.7, 0.4
-    ]
-
-    var body: some View {
-        GeometryReader { geometry in
-            HStack(alignment: .center, spacing: 6) {
-                ForEach(pattern.indices, id: \.self) { index in
-                    Capsule()
-                        .fill(color)
-                        .frame(
-                            width: max(4, (geometry.size.width - 120) / CGFloat(pattern.count)),
-                            height: max(12, geometry.size.height * pattern[index] * activeLevel)
-                        )
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(.easeOut(duration: 0.12), value: level)
-        }
-        .accessibilityLabel(phase == .paused ? "Gravação pausada" : "Nível de áudio da gravação")
-    }
-
-    private var activeLevel: CGFloat {
-        switch phase {
-        case .recording: max(0.1, CGFloat(level))
-        case .paused: 0.18
-        case .preparing, .finalizing, .transcribing, .summarizing, .publishing, .cleaning: 0.22
-        case .idle: 0.3
-        }
-    }
-
-    private var color: Color {
-        switch phase {
-        case .recording: .red
-        case .paused: .orange
-        case .preparing, .finalizing, .transcribing, .summarizing, .publishing, .cleaning: .blue
-        case .idle: .secondary.opacity(0.28)
-        }
-    }
-}
-
-private struct MainSourceLevelView: View {
-    let title: String
-    let level: Float
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.quaternary)
-                    Capsule()
-                        .fill(level > 0.78 ? Color.orange : brandAccent)
-                        .frame(width: geometry.size.width * CGFloat(level))
-                }
-            }
-            .frame(height: 7)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 11))
-    }
-}
-
-private struct CompactSourceLevelView: View {
-    let title: String
-    let level: Float
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ProgressView(value: Double(level), total: 1)
-                .tint(level > 0.78 ? .orange : brandAccent)
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Nível de \(title)")
-        .accessibilityValue("\(Int(level * 100)) por cento")
-    }
-}
-
 private struct NotificationInvitationView: View {
     @EnvironmentObject private var model: AppModel
 
@@ -1169,32 +769,10 @@ private struct NotificationInvitationView: View {
     }
 }
 
-private struct RecordingClock: View {
-    let timeline: RecordingTimeline
-    let isPaused: Bool
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 7) {
-                Image(systemName: isPaused ? "pause.circle.fill" : "record.circle.fill")
-                Text(formattedDuration(timeline.elapsed(at: context.date)))
-                    .monospacedDigit()
-            }
-            .font(.title2.weight(.semibold))
-            .foregroundStyle(isPaused ? .orange : .red)
-            .accessibilityLabel(
-                "\(isPaused ? "Gravação pausada" : "Gravando"), \(formattedDuration(timeline.elapsed(at: context.date)))"
-            )
-        }
-    }
-}
-
 private struct MeetingDetailView: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject var store: MeetingStore
     let selectedRecordID: UUID?
-    let compact: Bool
-
     private var record: MeetingRecord? {
         store.records.first { $0.id == selectedRecordID }
     }
@@ -1202,16 +780,19 @@ private struct MeetingDetailView: View {
     var body: some View {
         Group {
             if let record {
-                VStack(spacing: 0) {
-                    meetingHeader(record)
+                GeometryReader { geometry in
+                    let compact = geometry.size.width < 700 || geometry.size.height < 600
+                    VStack(spacing: 0) {
+                    meetingHeader(record, compact: compact)
                     Divider()
-                    AudioPlayerView(controller: model.playbackController, compact: compact)
-                        .padding(.horizontal, compact ? 16 : 22)
-                        .padding(.vertical, 14)
+                    AudioPlayerView(controller: model.playbackController, compact: geometry.size.width - 40 < 650)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
                     Divider()
                     MeetingDocumentsView(record: record)
                         .id(record.id)
-                        .padding(compact ? 16 : 22)
+                        .padding(compact ? 12 : 20)
+                    }
                 }
             } else {
                 ContentUnavailableView(
@@ -1225,107 +806,56 @@ private struct MeetingDetailView: View {
         .background(.background)
     }
 
-    private func meetingHeader(_ record: MeetingRecord) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if compact {
-                HStack(alignment: .top, spacing: 10) {
-                    meetingTitle(record)
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 6) {
-                        MeetingStatusBadge(status: record.status)
-                        meetingActions(record)
-                    }
+    private func meetingHeader(_ record: MeetingRecord, compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(record.title)
+                        .font(compact ? .headline : .title2.weight(.semibold))
+                        .lineLimit(2)
+                        .help(record.title)
+                        .textSelection(.enabled)
+                    Text("\(record.microphoneName) · \(record.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).help(record.microphoneName)
                 }
-            } else {
-                HStack(alignment: .top, spacing: 14) {
-                    meetingTitle(record)
-                    Spacer()
-                    MeetingStatusBadge(status: record.status)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                meetingActions(record)
             }
-
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { metadata(record) }
+                VStack(alignment: .leading, spacing: 6) { metadata(record) }
+            }
             if let error = record.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-                    .padding(10)
+                    .font(.callout).foregroundStyle(.primary)
+                    .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
+                    .background(.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
             }
-
             if !compact {
-                HStack(spacing: 10) {
-                    Button {
-                        model.reveal(record)
-                    } label: {
-                        Label("Mostrar no Finder", systemImage: "folder")
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button {
-                        Task { await model.retranscribe(record) }
-                    } label: {
-                        Label("Refazer transcrição", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(model.isBusy || !model.hasContent(.audio, in: record))
-
-                    Button {
-                        model.requestSummary(for: record)
-                    } label: {
-                        Label(
-                            model.hasSummary(record) ? "Refazer resumo" : "Gerar resumo",
-                            systemImage: "text.document"
-                        )
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(
-                        model.isBusy
-                            || !model.hasTranscript(in: record)
-                    )
-
-                    if model.isDiscordMeeting(record) {
-                        let publicationState = model.discordPublicationState(for: record)
-                        Button {
-                            Task { await model.publishToDiscord(record) }
-                        } label: {
-                            Label(
-                                discordPublicationButtonTitle(publicationState),
-                                systemImage: discordPublicationButtonIcon(publicationState)
-                            )
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        Button { model.reveal(record) } label: { Label("Mostrar no Finder", systemImage: "folder") }
+                        Button { model.requestSummary(for: record) } label: {
+                            Label(model.hasSummary(record) ? "Refazer resumo" : "Gerar resumo", systemImage: "text.document")
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(
-                            model.isBusy
-                                || !model.hasTranscript(in: record)
-                                || !model.discordConnected
-                                || publicationState == .published
-                                || publicationState == .unavailable
-                        )
+                        .disabled(model.isBusy || !model.hasTranscript(in: record))
                     }
-
-                    Spacer()
-                    meetingActions(record)
+                    .buttonStyle(.bordered)
+                    .fixedSize()
+                    EmptyView()
                 }
             }
         }
-        .padding(compact ? 12 : 22)
+        .padding(compact ? 12 : 20)
     }
 
-    private func meetingTitle(_ record: MeetingRecord) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(record.title)
-                .font(.system(.title2, design: .serif, weight: .semibold))
-                .textSelection(.enabled)
-            Text("\(record.microphoneName) · \(record.createdAt.formatted(date: .abbreviated, time: .shortened))")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-            Label("\(model.formattedDiskUsage(for: record)) no disco", systemImage: "internaldrive")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            discordPublicationStatus(record)
-        }
+    @ViewBuilder private func metadata(_ record: MeetingRecord) -> some View {
+        MeetingStatusBadge(status: record.status)
+        Label(model.formattedDiskUsage(for: record), systemImage: "internaldrive")
+            .font(.caption).foregroundStyle(.secondary)
+        discordPublicationStatus(record)
     }
 
     private func meetingActions(_ record: MeetingRecord) -> some View {
@@ -1406,7 +936,7 @@ private struct MeetingStatusBadge: View {
     var body: some View {
         Label(status.title, systemImage: meetingStatusIcon(status))
             .font(.caption.weight(.semibold))
-            .foregroundStyle(color)
+            .foregroundStyle(.primary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(color.opacity(0.12), in: Capsule())
@@ -1432,6 +962,8 @@ private enum MeetingDocumentTab: String, CaseIterable, Identifiable {
 private struct MeetingDocumentsView: View {
     let record: MeetingRecord
     @State private var selectedTab: MeetingDocumentTab
+    @EnvironmentObject private var documents: DocumentLibrary
+    @EnvironmentObject private var model: AppModel
 
     init(record: MeetingRecord) {
         self.record = record
@@ -1440,13 +972,23 @@ private struct MeetingDocumentsView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Picker("Conteúdo da reunião", selection: $selectedTab) {
+            Picker("Conteúdo da reunião", selection: Binding(
+                get: { selectedTab },
+                set: { tab in
+                    guard !documents.hasUnsavedChanges else {
+                        model.warningMessage = "Salve a edição pendente antes de trocar de documento."
+                        return
+                    }
+                    selectedTab = tab
+                }
+            )) {
                 ForEach(MeetingDocumentTab.allCases) { tab in
                     Text(tab.title).tag(tab)
                 }
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 320)
+            .labelsHidden()
+            .frame(maxWidth: 280)
 
             Group {
                 switch selectedTab {
@@ -1459,7 +1001,7 @@ private struct MeetingDocumentsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onChange(of: record.summaryPath) { _, value in
-            if value != nil { selectedTab = .summary }
+            if value != nil && !documents.hasUnsavedChanges { selectedTab = .summary }
         }
     }
 }
@@ -1552,125 +1094,6 @@ private struct TranscriptPreviewView: View {
     }
 }
 
-private struct EditableTextFileView: View {
-    let url: URL
-    let reloadToken: String
-    let unavailableTitle: String
-    let savedMessage: String
-    let accessibilityLabel: String
-    let isDisabled: Bool
-    let onSave: () -> Void
-
-    @State private var text = ""
-    @State private var errorMessage: String?
-    @State private var saveErrorMessage: String?
-    @State private var copied = false
-    @State private var lastLoadedText = ""
-    @State private var saveNotificationTask: Task<Void, Never>?
-
-    var body: some View {
-        Group {
-            if let errorMessage {
-                ContentUnavailableView(
-                    unavailableTitle,
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(errorMessage)
-                )
-            } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 10) {
-                        Label(
-                            saveErrorMessage == nil ? savedMessage : "Não foi possível salvar",
-                            systemImage: saveErrorMessage == nil ? "checkmark.circle" : "exclamationmark.triangle"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(saveErrorMessage == nil ? Color.secondary : Color.orange)
-
-                        Spacer()
-
-                        Button {
-                            copyText()
-                        } label: {
-                            Label(copied ? "Copiado" : "Copiar texto", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(text.isEmpty)
-                    }
-
-                    TextEditor(text: $text)
-                        .font(.system(.body, design: .monospaced))
-                        .lineSpacing(3)
-                        .scrollContentBackground(.hidden)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(.quaternary, lineWidth: 1)
-                        }
-                        .accessibilityLabel(accessibilityLabel)
-                        .disabled(isDisabled)
-
-                    if let saveErrorMessage {
-                        Text(saveErrorMessage)
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear(perform: load)
-        .onChange(of: reloadToken) { _, _ in load() }
-        .onChange(of: text) { _, newValue in save(newValue) }
-        .onDisappear { saveNotificationTask?.cancel() }
-    }
-
-    private func load() {
-        do {
-            let value = try String(contentsOf: url, encoding: .utf8)
-            lastLoadedText = value
-            text = value
-            errorMessage = nil
-            saveErrorMessage = nil
-        } catch {
-            lastLoadedText = ""
-            text = ""
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func save(_ value: String) {
-        guard value != lastLoadedText else { return }
-        do {
-            try value.write(to: url, atomically: true, encoding: .utf8)
-            lastLoadedText = value
-            saveErrorMessage = nil
-            saveNotificationTask?.cancel()
-            saveNotificationTask = Task {
-                do {
-                    try await Task.sleep(nanoseconds: 300_000_000)
-                } catch {
-                    return
-                }
-                onSave()
-            }
-        } catch {
-            saveErrorMessage = error.localizedDescription
-        }
-    }
-
-    private func copyText() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        copied = true
-        Task {
-            try? await Task.sleep(nanoseconds: 1_400_000_000)
-            copied = false
-        }
-    }
-}
-
 private struct AudioPlayerView: View {
     @ObservedObject var controller: AudioPlaybackController
     let compact: Bool
@@ -1680,28 +1103,13 @@ private struct AudioPlayerView: View {
             if controller.isAvailable {
                 if compact {
                     VStack(spacing: 10) {
-                        HStack(spacing: 10) {
-                            playbackButton
-                            currentTime
-                            positionSlider
-                            duration
-                        }
-                        HStack(spacing: 10) {
-                            playbackRate
-                            Spacer()
-                            volume
-                                .frame(maxWidth: 150)
-                        }
+                        primaryControls
+                        secondaryControls
                     }
                 } else {
                     HStack(spacing: 12) {
-                        playbackButton
-                        currentTime
-                        positionSlider
-                        duration
-                        playbackRate
-                        volume
-                            .frame(width: 100)
+                        primaryControls
+                        secondaryControls
                     }
                 }
             } else {
@@ -1710,6 +1118,25 @@ private struct AudioPlayerView: View {
                     .padding(.vertical, 8)
             }
         }
+    }
+
+    private var primaryControls: some View {
+        HStack(spacing: 10) {
+            playbackButton
+            currentTime
+            positionSlider
+            duration
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var secondaryControls: some View {
+        HStack(spacing: 12) {
+            playbackRate
+            Spacer(minLength: 0)
+            volume.frame(width: compact ? 150 : 100)
+        }
+        .frame(maxWidth: compact ? .infinity : 204)
     }
 
     private var playbackButton: some View {
@@ -1723,6 +1150,7 @@ private struct AudioPlayerView: View {
         .tint(brandAccent)
         .controlSize(.large)
         .help(controller.isPlaying ? "Pausar" : "Reproduzir")
+        .accessibilityLabel(controller.isPlaying ? "Pausar reprodução" : "Reproduzir áudio")
     }
 
     private var currentTime: some View {
@@ -1749,16 +1177,17 @@ private struct AudioPlayerView: View {
     }
 
     private var playbackRate: some View {
-        Picker("Velocidade", selection: Binding(
-            get: { controller.playbackRate },
-            set: { controller.playbackRate = $0 }
-        )) {
+        Picker("Velocidade de reprodução", selection: $controller.playbackRate) {
             ForEach(AudioPlaybackController.playbackRates, id: \.self) { rate in
                 Text(playbackRateLabel(rate)).tag(rate)
             }
         }
         .labelsHidden()
-        .frame(width: 82)
+        .pickerStyle(.menu)
+        .frame(width: 80, height: 28)
+        .accessibilityLabel("Velocidade de reprodução")
+        .accessibilityValue(playbackRateLabel(controller.playbackRate))
+        .accessibilityIdentifier("playback.speed")
         .help("Velocidade de reprodução")
     }
 
@@ -1794,7 +1223,7 @@ private struct RenameMeetingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Renomear reunião")
-                .font(.system(.title2, design: .serif, weight: .semibold))
+                .font(.system(.title2, design: .default, weight: .semibold))
             Text("O título no histórico será mantido como você digitou. A pasta será ajustada para o Finder.")
                 .foregroundStyle(.secondary)
             TextField("Nome da reunião", text: $name)
@@ -1817,7 +1246,7 @@ private struct RenameMeetingView: View {
             }
         }
         .padding(26)
-        .frame(width: 480)
+        .frame(minWidth: 360, idealWidth: 460, maxWidth: 480)
     }
 
     private func rename() {
