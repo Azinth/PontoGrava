@@ -1,17 +1,11 @@
 import SwiftUI
 
-private let menuAccent = Color(red: 0.79, green: 0.35, blue: 0.21)
+private let menuAccent = InterfaceStyle.accent
 
 struct MenuBarView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.openWindow) private var openWindow
-
-    private var combinedLevel: Float {
-        model.isDiscordRecording
-            ? model.discordAudioLevel
-            : max(model.systemAudioLevel, model.microphoneAudioLevel)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -80,64 +74,10 @@ struct MenuBarView: View {
     }
 
     private var recordingMonitor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(
-                model.isPaused ? "Gravação pausada" : model.recordingSourceName,
-                systemImage: model.isPaused ? "pause.circle.fill" : "record.circle.fill"
-            )
-            .font(.callout.weight(.medium))
-            .foregroundStyle(model.isPaused ? .orange : .primary)
-            .lineLimit(2)
-
-            LiveWaveformView(level: combinedLevel, isPaused: model.isPaused)
-                .frame(height: 56)
-                .padding(.horizontal, 8)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
-
-            if model.isDiscordRecording {
-                Label(
-                    model.discordParticipants.isEmpty
-                        ? "Aguardando participantes…"
-                        : model.discordParticipants.joined(separator: ", "),
-                    systemImage: "person.2.wave.2"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-            } else {
-                VStack(spacing: 8) {
-                    SourceLevelView(title: "Sistema", level: model.systemAudioLevel)
-                    SourceLevelView(title: "Microfone", level: model.microphoneAudioLevel)
-                }
-            }
-
-            HStack(spacing: 10) {
-                if model.canPauseRecording {
-                    Button {
-                        model.isPaused ? model.resumeRecording() : model.pauseRecording()
-                    } label: {
-                        Label(
-                            model.isPaused ? "Continuar" : "Pausar",
-                            systemImage: model.isPaused ? "play.fill" : "pause.fill"
-                        )
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(model.isPaused ? .orange : .primary)
-                }
-
-                Button(role: .destructive) {
-                    Task { await model.stopRecording() }
-                } label: {
-                    Label("Parar", systemImage: "stop.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-            }
+        VStack(alignment: .leading, spacing: 16) {
+            RecordingMonitor()
+            HStack { Spacer(minLength: 0); RecordingActions(abbreviated: true) }
         }
-        .padding(14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var idleActions: some View {
@@ -179,19 +119,7 @@ struct MenuBarView: View {
                 .disabled(model.isBusy)
             }
 
-            Button {
-                Task { await model.beginRecording() }
-            } label: {
-                Label(
-                    model.recordingMode == .discord ? "Gravar canal do Discord" : "Iniciar gravação",
-                    systemImage: "record.circle"
-                )
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(menuAccent)
-            .controlSize(.large)
-            .disabled(!model.canBeginRecording)
+            RecordingActions()
 
             HStack(spacing: 8) {
                 Button {

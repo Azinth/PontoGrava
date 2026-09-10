@@ -3,6 +3,23 @@ import SwiftUI
 @main
 struct PontoGravaApp: App {
     @StateObject private var model = AppModel()
+    @NSApplicationDelegateAdaptor(DocumentApplicationDelegate.self) private var documentDelegate
+
+    init() {
+        #if DEBUG
+        if Bundle.main.bundleIdentifier == "com.pontograva.interface-review",
+           !CommandLine.arguments.contains("--review-interface") { exit(0) }
+        if let index = CommandLine.arguments.firstIndex(of: "--review-interface"), CommandLine.arguments.count > index + 1 {
+            do {
+                try InterfaceReview.run(output: URL(fileURLWithPath: CommandLine.arguments[index + 1]))
+                exit(0)
+            } catch {
+                fputs("Interface review failed: \(error)\n", stderr)
+                exit(1)
+            }
+        }
+        #endif
+    }
 
     var body: some Scene {
         WindowGroup(id: "main") {
@@ -43,7 +60,7 @@ struct PontoGravaApp: App {
                     Text("Foram encontrados arquivos de \(request.folder.lastPathComponent) que ainda não estão no histórico.")
                 }
         }
-        .defaultSize(width: 1_180, height: 760)
+        .defaultSize(width: 1_280, height: 800)
         .windowResizability(.contentMinSize)
 
         MenuBarExtra(
