@@ -59,6 +59,18 @@ outras janelas, com a duração, o nível do áudio e os botões de pausar, para
 abrir o app e minimizar para a barra de menus. A barrinha pode ser arrastada para
 qualquer lugar da tela.
 
+<p align="center">
+  <img src="docs/images/pontograva-recording-bar-light.png" width="300" alt="Barrinha flutuante durante a gravação, tema claro">
+</p>
+
+<p align="center">
+  <img src="docs/images/pontograva-recording-bar-paused-dark.png" width="300" alt="Barrinha flutuante com a gravação pausada, tema escuro">
+</p>
+
+Durante a gravação, o ponto e as barras ao lado acompanham o nível do áudio, como
+no ícone do PontoGrava. Na pausa, a barrinha fica laranja e o tempo para de contar.
+Se ela for minimizada, o botão de popup no menu da barra de menus a mostra de novo.
+
 ## Baixar e instalar
 
 ### Requisitos
@@ -101,7 +113,8 @@ PontoGrava novamente.
 1. Abra o PontoGrava e selecione o modo **Mac**.
 2. Escolha o microfone nos detalhes de captura e o idioma da transcrição nos **Ajustes**.
 3. Clique em **Iniciar gravação**.
-4. Use **Pausar** quando necessário ou **Parar e transcrever** ao terminar.
+4. O app se esconde e deixa a barrinha flutuante. Use ⏸ para pausar quando
+   necessário e ⏹ para parar e transcrever ao terminar.
 
 O app combina sistema e microfone no mesmo WAV. As pausas são removidas do
 áudio, da duração e dos timestamps da transcrição.
@@ -168,6 +181,7 @@ O PontoGrava procura os executáveis em `/opt/homebrew/bin` e `/usr/local/bin`.
 4. Use o link de convite exibido pelo app para adicionar o bot ao servidor e autorizar os comandos `/start`, `/pause`, `/resume` e `/stop`.
 5. Autorize as permissões **Ver canais**, **Conectar**, **Enviar mensagens**, **Anexar arquivos**, **Ler histórico de mensagens**, **Gerenciar canais** e **Gerenciar cargos**. Os membros também precisam poder **Usar comandos de aplicativos** no canal.
 6. Escolha o servidor e o canal de voz e clique em **Gravar canal do Discord** ou use `/start` no chat integrado do canal de voz em que você está.
+7. Durante a gravação, pause e retome pela barrinha flutuante ou com `/pause` e `/resume` no chat do canal.
 
 Bots convidados por versões anteriores precisam ser autorizados novamente pelo
 link exibido no PontoGrava para receber as novas permissões.
