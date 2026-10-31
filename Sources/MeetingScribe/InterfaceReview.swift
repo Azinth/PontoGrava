@@ -189,7 +189,7 @@ enum InterfaceReview {
         try captureSurface(AppSettingsView().environmentObject(model).environmentObject(settings), size: CGSize(width: 640, height: 560), name: "settings", output: output)
         try captureSurface(OnboardingView().environmentObject(model).environmentObject(settings), size: CGSize(width: 580, height: 520), name: "onboarding", output: output)
         model.configureInterfaceReview(discord: false, phase: .recording)
-        try captureSurface(RecordingPanelView().environmentObject(model).environmentObject(settings), size: CGSize(width: 450, height: 310), name: "floating-panel", output: output)
+        try captureSurface(RecordingPanelView().environmentObject(model).environmentObject(settings), size: CGSize(width: 300, height: 44), name: "floating-panel", output: output)
         try captureSurface(MenuBarView().environmentObject(model).environmentObject(settings), size: CGSize(width: 360, height: 350), name: "menu-bar", output: output)
         print("Interface review completed: \(output.path)")
     }

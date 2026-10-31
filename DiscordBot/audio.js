@@ -27,13 +27,16 @@ export function createPCMLevelMeter(onLevel) {
   });
 }
 
-export function markClipFirstPacket(clip, sessionStartedAt, now = Date.now) {
+/** Milliseconds of recorded audio at `at`, excluding time spent paused. */
+export function recordingOffsetMs(session, at = Date.now()) {
+  const startedAt = Date.parse(session.startedAt);
+  const offset = Number(at) - startedAt - (Number(session.pausedMs) || 0);
+  return Number.isFinite(offset) ? Math.max(0, offset) : 0;
+}
+
+export function markClipFirstPacket(clip, session, now = Date.now) {
   if (Number.isFinite(clip.offsetMs)) return false;
-  const startedAt = Date.parse(sessionStartedAt);
-  const receivedAt = Number(now());
-  clip.offsetMs = Number.isFinite(startedAt) && Number.isFinite(receivedAt)
-    ? Math.max(0, receivedAt - startedAt)
-    : 0;
+  clip.offsetMs = recordingOffsetMs(session, now());
   return true;
 }
 
@@ -89,10 +92,11 @@ export class SpeakerCaptureCoordinator {
     this.pending = new Set();
     this.scheduled = new Map();
     this.stopped = false;
+    this.paused = false;
   }
 
   request(userId) {
-    if (this.stopped) return null;
+    if (this.stopped || this.paused) return null;
     const active = this.captures.get(userId);
     if (active) {
       if (active.ending) active.restartRequested = true;
@@ -140,7 +144,7 @@ export class SpeakerCaptureCoordinator {
   complete(userId, capture) {
     if (this.captures.get(userId) !== capture) return;
     this.captures.delete(userId);
-    if (this.stopped) return;
+    if (this.stopped || this.paused) return;
 
     let shouldRestart = capture.restartRequested;
     if (!shouldRestart) {
@@ -167,6 +171,19 @@ export class SpeakerCaptureCoordinator {
 
   stop() {
     this.stopped = true;
+    this.clearScheduled();
+  }
+
+  pause() {
+    this.paused = true;
+    this.clearScheduled();
+  }
+
+  resume() {
+    this.paused = false;
+  }
+
+  clearScheduled() {
     for (const timer of this.scheduled.values()) {
       if (timer) clearTimeout(timer);
     }

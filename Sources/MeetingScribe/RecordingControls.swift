@@ -16,7 +16,7 @@ struct RecordingActions: View {
         if model.isRecordingSession {
             if model.canPauseRecording {
                 Button {
-                    model.isPaused ? model.resumeRecording() : model.pauseRecording()
+                    Task { await model.togglePause() }
                 } label: {
                     Label(model.isPaused ? "Continuar" : "Pausar", systemImage: model.isPaused ? "play.fill" : "pause.fill")
                 }
@@ -56,10 +56,7 @@ struct RecordingMonitor: View {
                 .font(.headline)
                 .lineLimit(2)
                 .help(model.recordingSourceName)
-            LiveWaveformView(
-                level: model.isDiscordRecording ? model.discordAudioLevel : max(model.systemAudioLevel, model.microphoneAudioLevel),
-                isPaused: model.isPaused
-            )
+            LiveWaveformView(level: model.liveAudioLevel, isPaused: model.isPaused)
             .frame(height: 56)
             if model.isDiscordRecording {
                 Label(model.discordParticipants.isEmpty ? "Aguardando participantes…" : model.discordParticipants.joined(separator: ", "),

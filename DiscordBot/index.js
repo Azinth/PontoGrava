@@ -14,7 +14,7 @@ import {
   GatewayIntentBits
 } from 'discord.js';
 import prism from 'prism-media';
-import { publishMeeting } from './publication.js';
+import { publicationErrorMessage, publishMeeting } from './publication.js';
 import {
   AudioLevelReporter,
   SpeakerCaptureCoordinator,
@@ -23,6 +23,7 @@ import {
   locateFFmpeg,
   markClipFirstPacket,
   readSession,
+  recordingOffsetMs,
   recordingCommandError,
   safeName,
   startRecordingCommandError,
@@ -54,10 +55,11 @@ let emptyTimer = null;
 let isShuttingDown = false;
 const recordingCommands = [
   { name: 'start', description: 'Inicia a gravação do canal de voz atual com o PontoGrava.' },
+  { name: 'pause', description: 'Pausa a gravação ativa do PontoGrava; o trecho pausado não entra no áudio.' },
+  { name: 'resume', description: 'Retoma a gravação pausada do PontoGrava.' },
   { name: 'stop', description: 'Encerra e finaliza a gravação ativa do PontoGrava.' }
 ];
 const recordingCommandNames = new Set(recordingCommands.map(command => command.name));
-const removedRecordingCommandNames = new Set(['pause', 'resume']);
 
 function emit(value) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -77,11 +79,6 @@ function event(name, result = {}) {
 
 async function ensureGuildCommands(guild) {
   const existing = await guild.commands.fetch();
-  await Promise.all(
-    existing
-      .filter(command => removedRecordingCommandNames.has(command.name))
-      .map(command => command.delete())
-  );
   for (const command of recordingCommands) {
     const registered = existing.find(item => item.name === command.name);
     if (registered) await registered.edit(command);
@@ -155,7 +152,7 @@ function beginSpeakerCapture(current, userId, { markEnding }) {
     end: { behavior: EndBehaviorType.AfterSilence, duration: 250 }
   });
   opus.once('data', () => {
-    if (markClipFirstPacket(clip, current.session.startedAt)) persistSession(current);
+    if (markClipFirstPacket(clip, current.session)) persistSession(current);
   });
   opus.once('end', markEnding);
   opus.once('close', markEnding);
@@ -170,7 +167,7 @@ function beginSpeakerCapture(current, userId, { markEnding }) {
   return new Promise((resolve, reject) => {
     pipeline(opus, decoder, meter, output, error => {
       markEnding();
-      clip.endedOffsetMs = Date.now() - Date.parse(current.session.startedAt);
+      clip.endedOffsetMs = recordingOffsetMs(current.session);
       if (recording === current) persistSession(current);
       current.audioLevels.remove(userId);
       if (error) reject(error);
@@ -301,6 +298,7 @@ async function stopRecording(reason = 'manual', announce = true) {
   const current = recording;
   if (!current) throw new Error('Não há gravação do Discord em andamento.');
   recording = null;
+  closePause(current);
   current.captureCoordinator.stop();
   clearTimeout(emptyTimer);
   emptyTimer = null;
@@ -309,7 +307,7 @@ async function stopRecording(reason = 'manual', announce = true) {
   current.connection.destroy();
   await current.captureCoordinator.settle();
   current.session.status = 'finalizing';
-  current.session.durationSeconds = Math.max(0.1, (Date.now() - Date.parse(current.session.startedAt)) / 1000);
+  current.session.durationSeconds = Math.max(0.1, recordingOffsetMs(current.session) / 1000);
   writeJSONAtomic(current.sessionPath, current.session);
   const result = await finalizeOnce(current.folderPath);
   if (announce && typeof current.channel.send === 'function') {
@@ -320,6 +318,70 @@ async function stopRecording(reason = 'manual', announce = true) {
     }
   }
   return result;
+}
+
+async function announce(current, message) {
+  if (typeof current.channel.send !== 'function') return;
+  try {
+    await current.channel.send(message);
+  } catch (error) {
+    process.stderr.write(`Discord notice: ${error.message}\n`);
+  }
+}
+
+function closePause(current) {
+  if (!current.pausedAt) return;
+  current.session.pausedMs = (Number(current.session.pausedMs) || 0) + (Date.now() - current.pausedAt);
+  current.pausedAt = null;
+}
+
+/** Returns false when the recording was already in the requested state. */
+function setPaused(current, paused) {
+  if (Boolean(current.pausedAt) === paused) return false;
+  if (paused) {
+    current.pausedAt = Date.now();
+    current.captureCoordinator.pause();
+    for (const stream of current.connection.receiver.subscriptions.values()) stream.push(null);
+    current.audioLevels.reset();
+  } else {
+    closePause(current);
+    current.captureCoordinator.resume();
+  }
+  persistSession(current);
+  if (!paused) {
+    for (const userId of current.connection.receiver.speaking.users.keys()) recordSpeaker(userId);
+  }
+  return true;
+}
+
+async function setPausedFromApp(paused) {
+  const current = recording;
+  if (!current) throw new Error('Não há gravação do Discord em andamento.');
+  if (setPaused(current, paused)) {
+    await announce(current, paused ? '⏸️ O PontoGrava pausou a gravação.' : '▶️ O PontoGrava retomou a gravação.');
+  }
+  return {};
+}
+
+async function handlePauseInteraction(interaction, paused) {
+  const validationError = recordingCommandError(
+    recording,
+    interaction.guildId,
+    interaction.channelId
+  );
+  if (validationError) {
+    await rejectInteraction(interaction, validationError);
+    return;
+  }
+  if (!setPaused(recording, paused)) {
+    await rejectInteraction(interaction, paused ? 'A gravação já está pausada.' : 'A gravação não está pausada.');
+    return;
+  }
+  event(paused ? 'recordingPaused' : 'recordingResumed');
+  const displayName = memberName(interaction);
+  await interaction.reply(paused
+    ? `⏸️ ${displayName} pausou a gravação. Use /resume para continuar.`
+    : `▶️ ${displayName} retomou a gravação.`);
 }
 
 function memberName(interaction) {
@@ -400,6 +462,8 @@ async function handleStopInteraction(interaction) {
 async function handleInteraction(interaction) {
   if (!interaction.isChatInputCommand() || !recordingCommandNames.has(interaction.commandName)) return;
   if (interaction.commandName === 'start') await handleStartInteraction(interaction);
+  else if (interaction.commandName === 'pause') await handlePauseInteraction(interaction, true);
+  else if (interaction.commandName === 'resume') await handlePauseInteraction(interaction, false);
   else await handleStopInteraction(interaction);
 }
 
@@ -442,13 +506,20 @@ async function handle(command) {
     await finishStartRequest(command.requestId, command.message);
     return {};
   case 'stop': return stopRecording('manual');
+  case 'pause': return setPausedFromApp(true);
+  case 'resume': return setPausedFromApp(false);
   case 'recover': {
     const session = readSession(command.folderPath);
     session.status = 'finalizing';
     writeJSONAtomic(join(command.folderPath, '.discord', 'session.json'), session);
     return finalizeOnce(command.folderPath);
   }
-  case 'publishMeeting': return publishMeeting(client, command);
+  case 'publishMeeting':
+    try {
+      return await publishMeeting(client, command);
+    } catch (error) {
+      throw new Error(publicationErrorMessage(error));
+    }
   default: throw new Error(`Comando desconhecido: ${command.command}`);
   }
 }
