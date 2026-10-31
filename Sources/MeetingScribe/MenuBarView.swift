@@ -76,7 +76,15 @@ struct MenuBarView: View {
     private var recordingMonitor: some View {
         VStack(alignment: .leading, spacing: 16) {
             RecordingMonitor()
-            HStack { Spacer(minLength: 0); RecordingActions(abbreviated: true) }
+            HStack {
+                Button { model.showRecordingPanel() } label: { Image(systemName: "rectangle.on.rectangle") }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .help("Mostrar popup flutuante")
+                    .accessibilityLabel("Mostrar popup flutuante")
+                Spacer(minLength: 0)
+                RecordingActions(abbreviated: true)
+            }
         }
     }
 
