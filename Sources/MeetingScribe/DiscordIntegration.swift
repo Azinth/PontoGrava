@@ -192,6 +192,7 @@ enum DiscordBotEvent {
     case startRequested(DiscordStartRequest)
     case participant(String)
     case audioLevel(Float)
+    case paused(Bool)
     case stopped(DiscordCaptureResult)
     case failed(String)
     case helperStopped(String?)
@@ -250,6 +251,14 @@ final class DiscordBotClient {
 
     func stop() async throws -> DiscordCaptureResult {
         try decode(DiscordCaptureResult.self, from: await send(command: "stop"))
+    }
+
+    func pause() async throws {
+        _ = try await send(command: "pause")
+    }
+
+    func resume() async throws {
+        _ = try await send(command: "resume")
     }
 
     func recover(folder: URL) async throws -> DiscordCaptureResult {
@@ -413,6 +422,8 @@ final class DiscordBotClient {
             if let level = result["level"] as? NSNumber {
                 onEvent?(.audioLevel(level.floatValue))
             }
+        case "recordingPaused", "recordingResumed":
+            onEvent?(.paused(name == "recordingPaused"))
         case "recordingStopped":
             if let capture = try? decode(DiscordCaptureResult.self, from: result) {
                 onEvent?(.stopped(capture))

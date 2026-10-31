@@ -29,7 +29,9 @@ final class AppModel: ObservableObject {
             }
         }
     }
-    @Published var phase: AppPhase = .idle
+    @Published var phase: AppPhase = .idle {
+        didSet { if !isRecordingSession { RecordingPanelController.shared.hide() } }
+    }
     @Published var progress: Double = 0
     @Published var statusDetail = "Escolha o microfone e inicie uma reunião."
     @Published var warningMessage: String?
@@ -112,7 +114,8 @@ final class AppModel: ObservableObject {
     var isPaused: Bool { phase == .paused }
     var isRecordingSession: Bool { isRecording || isPaused }
     var isDiscordRecording: Bool { isRecordingSession && activeDiscordRecording }
-    var canPauseRecording: Bool { isRecordingSession && !activeDiscordRecording }
+    var liveAudioLevel: Float { isDiscordRecording ? discordAudioLevel : max(systemAudioLevel, microphoneAudioLevel) }
+    var canPauseRecording: Bool { isRecordingSession }
     var recordingStartedAt: Date? { recordingTimeline.startedAt }
     var summaryUnavailableMessage: String? {
         switch settings.summaryProvider {
@@ -151,7 +154,7 @@ final class AppModel: ObservableObject {
 
     var discordInviteURL: URL? {
         guard let discordApplicationID else { return nil }
-        return URL(string: "https://discord.com/oauth2/authorize?client_id=\(discordApplicationID)&scope=bot%20applications.commands&permissions=1149968")
+        return URL(string: "https://discord.com/oauth2/authorize?client_id=\(discordApplicationID)&scope=bot%20applications.commands&permissions=269585424")
     }
 
     func initialize() async {
@@ -238,33 +241,58 @@ final class AppModel: ObservableObject {
             recordingTimeline.start(at: createdAt)
             phase = .recording
             statusDetail = "Sistema + \(selectedMicrophoneName)"
+            showRecordingPanel()
+            NSApplication.shared.hide(nil)
         } catch {
             try? FileManager.default.removeItem(at: folder)
             fail(error)
         }
     }
 
-    func pauseRecording() {
-        guard phase == .recording, !activeDiscordRecording else { return }
+    func togglePause() async {
+        isPaused ? await resumeRecording() : await pauseRecording()
+    }
+
+    func pauseRecording() async {
+        guard phase == .recording else { return }
+        let pausedAt = Date()
         do {
-            try recordingEngine.pause()
-            recordingTimeline.pause(at: Date())
-            phase = .paused
-            statusDetail = "Pausada — o intervalo não será incluído no WAV."
+            if activeDiscordRecording {
+                try await discordBotClient.pause()
+            } else {
+                try recordingEngine.pause()
+            }
+            applyPause(true, at: pausedAt)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    func resumeRecording() {
-        guard phase == .paused, !activeDiscordRecording else { return }
+    func resumeRecording() async {
+        guard phase == .paused else { return }
         do {
-            try recordingEngine.resume()
-            recordingTimeline.resume(at: Date())
-            phase = .recording
-            statusDetail = "Sistema + \(selectedMicrophoneName)"
+            if activeDiscordRecording {
+                try await discordBotClient.resume()
+            } else {
+                try recordingEngine.resume()
+            }
+            applyPause(false, at: Date())
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Updates the UI state once the capture itself is paused or resumed (by the app or by /pause in Discord).
+    private func applyPause(_ paused: Bool, at date: Date) {
+        guard phase == (paused ? .recording : .paused) else { return }
+        if paused {
+            recordingTimeline.pause(at: date)
+            phase = .paused
+            statusDetail = "Pausada — o intervalo não será incluído no áudio."
+        } else {
+            recordingTimeline.resume(at: date)
+            phase = .recording
+            statusDetail = activeDiscordRecording ? "Gravando o canal do Discord." : "Sistema + \(selectedMicrophoneName)"
         }
     }
 
@@ -280,7 +308,6 @@ final class AppModel: ObservableObject {
         guard isRecordingSession,
               let folder = activeFolder,
               let createdAt = activeCreatedAt else { return }
-        RecordingPanelController.shared.hide()
         phase = .finalizing
         statusDetail = "Sincronizando e combinando as duas fontes…"
 
@@ -626,7 +653,7 @@ final class AppModel: ObservableObject {
     }
 
     func showRecordingPanel() {
-        guard isRecordingSession, !activeDiscordRecording else { return }
+        guard isRecordingSession else { return }
         RecordingPanelController.shared.show(model: self)
     }
 
@@ -1029,7 +1056,6 @@ final class AppModel: ObservableObject {
     }
 
     private func fail(_ error: Error) {
-        RecordingPanelController.shared.hide()
         phase = .idle
         progress = 0
         statusDetail = "Não foi possível concluir a operação."
@@ -1090,6 +1116,8 @@ final class AppModel: ObservableObject {
             recordingTimeline.start(at: createdAt)
             phase = .recording
             statusDetail = "Gravando o canal do Discord."
+            showRecordingPanel()
+            NSApplication.shared.hide(nil)
         } catch {
             if let request {
                 await discordBotClient.rejectStart(
@@ -1150,6 +1178,9 @@ final class AppModel: ObservableObject {
             if activeDiscordRecording || phase == .preparing {
                 discordAudioLevel = max(0, min(1, level))
             }
+        case let .paused(paused):
+            guard activeDiscordRecording else { return }
+            applyPause(paused, at: Date())
         case let .stopped(result):
             guard activeDiscordRecording else { return }
             phase = .finalizing

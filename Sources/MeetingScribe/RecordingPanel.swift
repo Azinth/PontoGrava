@@ -11,11 +11,11 @@ final class RecordingPanelController: NSObject, NSWindowDelegate {
 
     func show(model: AppModel) {
         if panel == nil {
-            panel = makePanel(model: model)
+            let created = makePanel(model: model)
+            position(created)
+            panel = created
         }
-        guard let panel else { return }
-        position(panel)
-        panel.orderFrontRegardless()
+        panel?.orderFrontRegardless()
     }
 
     func hide() {
@@ -28,24 +28,24 @@ final class RecordingPanelController: NSObject, NSWindowDelegate {
     }
 
     private func makePanel(model: AppModel) -> NSPanel {
-        let size = NSSize(width: 450, height: 300)
+        let size = NSSize(width: 300, height: 44)
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         panel.title = "PontoGrava"
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.canHide = false
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.delegate = self
         panel.contentViewController = NSHostingController(
             rootView: RecordingPanelView()
@@ -72,27 +72,69 @@ final class RecordingPanelController: NSObject, NSWindowDelegate {
 struct RecordingPanelView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var settings: AppSettings
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("PontoGrava").font(.headline)
-                Spacer()
-                RecordingTime()
-                Button { model.hideRecordingPanel() } label: { Image(systemName: "chevron.down") }
-                    .buttonStyle(.borderless)
-                    .help("Recolher para a barra de menus")
-                    .accessibilityLabel("Recolher painel de gravação")
+        HStack(spacing: 10) {
+            RecordingGlyph(level: model.liveAudioLevel, isPaused: model.isPaused)
+            RecordingTime()
+            Spacer(minLength: 0)
+            if model.canPauseRecording {
+                Button {
+                    Task { await model.togglePause() }
+                } label: { Image(systemName: model.isPaused ? "play.fill" : "pause.fill") }
+                    .help(model.isPaused ? "Continuar" : "Pausar")
+                    .accessibilityLabel(model.isPaused ? "Continuar gravação" : "Pausar gravação")
             }
-            RecordingMonitor()
-            HStack { Spacer(minLength: 0); RecordingActions() }
+            Button(role: .destructive) {
+                Task { await model.stopRecording() }
+            } label: { Image(systemName: "stop.fill").foregroundStyle(.red) }
+                .help("Parar e transcrever")
+                .accessibilityLabel("Parar e transcrever")
+            Button {
+                NSApplication.shared.unhide(nil)
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                if !NSApplication.shared.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) {
+                    openWindow(id: "main")
+                }
+            } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                .help("Abrir o PontoGrava")
+                .accessibilityLabel("Expandir")
+            Button { model.hideRecordingPanel() } label: { Image(systemName: "minus") }
+                .help("Minimizar para a barra de menus")
+                .accessibilityLabel("Minimizar para a barra de menus")
         }
-        .padding(20)
-        .frame(width: 450)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(.background)
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 14)
+        .frame(width: 300, height: 44)
+        .background(.regularMaterial, in: Capsule())
+        .contentShape(Capsule())
+        .gesture(WindowDragGesture())
         .tint(panelAccent)
         .preferredColorScheme(settings.appearance.colorScheme)
+    }
+}
+
+/// The app icon in miniature: a dot followed by bars that follow the live audio level.
+struct RecordingGlyph: View {
+    let level: Float
+    let isPaused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let pattern: [CGFloat] = [0.4, 0.75, 1, 0.65, 0.4]
+
+    var body: some View {
+        let color: Color = isPaused ? .orange : .red
+        let scale = isPaused ? 0.45 : 0.45 + 0.55 * CGFloat(min(1, max(0, level)))
+        HStack(spacing: 2.5) {
+            Circle().fill(color).frame(width: 10, height: 10).padding(.trailing, 2)
+            ForEach(pattern.indices, id: \.self) { index in
+                Capsule().fill(color).frame(width: 2.5, height: 20 * pattern[index] * scale)
+            }
+        }
+        .frame(height: 20)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: level)
+        .accessibilityHidden(true)
     }
 }
 

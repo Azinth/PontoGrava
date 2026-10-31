@@ -54,6 +54,11 @@ Os controles compartilham os estilos e estados da janela principal, com gravaç�
 cronômetro e ações compactas. A configuração inicial e os Ajustes permitem rolagem
 para manter as ações acessíveis em janelas menores.
 
+Ao iniciar uma gravação, o app se esconde e deixa uma barrinha flutuante sobre as
+outras janelas, com a duração, o nível do áudio e os botões de pausar, parar,
+abrir o app e minimizar para a barra de menus. A barrinha pode ser arrastada para
+qualquer lugar da tela.
+
 ## Baixar e instalar
 
 ### Requisitos
@@ -160,8 +165,8 @@ O PontoGrava procura os executáveis em `/opt/homebrew/bin` e `/usr/local/bin`.
 1. Crie uma aplicação no [Discord Developer Portal](https://discord.com/developers/applications).
 2. Abra a seção **Bot**, crie o bot e copie o **Token**. A **Public Key** não funciona como token.
 3. No PontoGrava, selecione **Discord**, cole o token e clique em **Salvar e conectar**.
-4. Use o link de convite exibido pelo app para adicionar o bot ao servidor e autorizar os comandos `/start` e `/stop`.
-5. Autorize as permissões **Ver canais**, **Conectar**, **Enviar mensagens**, **Anexar arquivos**, **Ler histórico de mensagens** e **Gerenciar canais**. Os membros também precisam poder **Usar comandos de aplicativos** no canal.
+4. Use o link de convite exibido pelo app para adicionar o bot ao servidor e autorizar os comandos `/start`, `/pause`, `/resume` e `/stop`.
+5. Autorize as permissões **Ver canais**, **Conectar**, **Enviar mensagens**, **Anexar arquivos**, **Ler histórico de mensagens**, **Gerenciar canais** e **Gerenciar cargos**. Os membros também precisam poder **Usar comandos de aplicativos** no canal.
 6. Escolha o servidor e o canal de voz e clique em **Gravar canal do Discord** ou use `/start` no chat integrado do canal de voz em que você está.
 
 Bots convidados por versões anteriores precisam ser autorizados novamente pelo
@@ -171,7 +176,8 @@ A gravação termina pelo botão do app, ao perder a conexão ou depois que o bo
 fica sozinho por 60 segundos. Se o app for interrompido, ele oferece a
 recuperação dos trechos locais na próxima abertura.
 
-Qualquer membro com acesso ao chat do canal de voz pode usar `/start` e `/stop`.
+Qualquer membro com acesso ao chat do canal de voz pode usar `/start`, `/pause`,
+`/resume` e `/stop`. O trecho pausado não entra no áudio nem na transcrição.
 O PontoGrava aceita uma única gravação por vez; comandos enviados em outros
 canais ou enquanto o app está ocupado são recusados de forma privada. O app
 precisa permanecer aberto e conectado ao Discord no Mac para responder aos
@@ -238,7 +244,7 @@ completo e abra novamente.
 - Use o token da seção **Bot**, não a Public Key ou o Application ID.
 - Execute `brew install node ffmpeg` e reabra o PontoGrava.
 - Confirme que o bot foi convidado para o servidor e pode ver o canal.
-- Para publicar reuniões, autorize novamente o bot e confirme a permissão **Gerenciar canais**.
+- Para publicar reuniões, autorize novamente o bot e confirme as permissões **Gerenciar canais** e **Gerenciar cargos**.
 
 ### O bot entra no canal, mas não grava
 
