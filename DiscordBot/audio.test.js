@@ -17,6 +17,7 @@ import {
   normalizedPCMLevel,
   participantFilter,
   recordingCommandError,
+  recordingOffsetMs,
   safeName,
   startRecordingCommandError,
   writeJSONAtomic
@@ -120,6 +121,36 @@ test('restarts after a new speaking event arrives while the old capture is endin
   await coordinator.settle();
 });
 
+test('does not capture or restart while paused and captures again after resume', async () => {
+  const captures = [];
+  let speaking = true;
+  const coordinator = new SpeakerCaptureCoordinator({
+    beginCapture: () => {
+      const capture = deferred();
+      captures.push(capture);
+      return capture.promise;
+    },
+    isSpeaking: () => speaking
+  });
+
+  const first = coordinator.request('ana');
+  coordinator.pause();
+  captures[0].resolve();
+  await first;
+  await flushTasks();
+  assert.equal(captures.length, 1);
+  assert.equal(coordinator.request('beto'), null);
+
+  coordinator.resume();
+  speaking = false;
+  coordinator.request('beto');
+  assert.equal(captures.length, 2);
+
+  coordinator.stop();
+  captures[1].resolve();
+  await coordinator.settle();
+});
+
 test('recovers one participant at the silence boundary without duplicating another', async () => {
   const captures = new Map();
   const coordinator = new SpeakerCaptureCoordinator({
@@ -216,21 +247,29 @@ test('aligns overlapping clips before mixing', () => {
 
 test('aligns a recovered capture to its first packet instead of its idle subscription', () => {
   const clip = { offsetMs: null };
-  const startedAt = '2026-07-24T18:06:25.000Z';
+  const session = { startedAt: '2026-07-24T18:06:25.000Z' };
 
   assert.equal(markClipFirstPacket(
     clip,
-    startedAt,
+    session,
     () => Date.parse('2026-07-24T18:06:29.000Z')
   ), true);
   assert.equal(clip.offsetMs, 4_000);
   assert.equal(markClipFirstPacket(
     clip,
-    startedAt,
+    session,
     () => Date.parse('2026-07-24T18:06:35.000Z')
   ), false);
   assert.equal(clip.offsetMs, 4_000);
   assert.match(participantFilter([clip], 5), /adelay=4000:all=1/);
+});
+
+test('leaves paused time out of clip offsets', () => {
+  const session = { startedAt: '2026-07-24T18:06:25.000Z', pausedMs: 30_000 };
+  const clip = { offsetMs: null };
+  markClipFirstPacket(clip, session, () => Date.parse('2026-07-24T18:07:05.000Z'));
+  assert.equal(clip.offsetMs, 10_000);
+  assert.equal(recordingOffsetMs(session, Date.parse('2026-07-24T18:06:40.000Z')), 0);
 });
 
 test('normalizes v2 capture diagnostics and counts discarded empty clips', () => {
