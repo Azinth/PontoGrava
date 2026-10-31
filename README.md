@@ -60,11 +60,11 @@ abrir o app e minimizar para a barra de menus. A barrinha pode ser arrastada par
 qualquer lugar da tela.
 
 <p align="center">
-  <img src="docs/images/pontograva-recording-bar-light.png" width="300" alt="Barrinha flutuante durante a gravação, tema claro">
+  <img src="docs/images/pontograva-recording-bar-light.png" width="346" alt="Barrinha flutuante durante a gravação, tema claro">
 </p>
 
 <p align="center">
-  <img src="docs/images/pontograva-recording-bar-paused-dark.png" width="300" alt="Barrinha flutuante com a gravação pausada, tema escuro">
+  <img src="docs/images/pontograva-recording-bar-paused-dark.png" width="346" alt="Barrinha flutuante com a gravação pausada, tema escuro">
 </p>
 
 Durante a gravação, o ponto e as barras ao lado acompanham o nível do áudio, como
