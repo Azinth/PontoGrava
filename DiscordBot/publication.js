@@ -36,12 +36,22 @@ export function publicationChannelTopic(topic, voiceChannelId) {
 }
 
 function permissionOverwrites(channel) {
-  return [...channel.permissionOverwrites.cache.values()].map(overwrite => ({
+  return [...(channel.permissionOverwrites?.cache.values() ?? [])].map(overwrite => ({
     id: overwrite.id,
     type: overwrite.type,
     allow: overwrite.allow.bitfield,
     deny: overwrite.deny.bitfield
   }));
+}
+
+function hasPermissionOverwrites(channel, expected) {
+  const current = permissionOverwrites(channel);
+  if (current.length !== expected.length) return false;
+  const byId = new Map(current.map(overwrite => [`${overwrite.type}:${overwrite.id}`, overwrite]));
+  return expected.every(overwrite => {
+    const existing = byId.get(`${overwrite.type}:${overwrite.id}`);
+    return existing?.allow === overwrite.allow && existing?.deny === overwrite.deny;
+  });
 }
 
 function textChannels(guild) {
@@ -101,14 +111,26 @@ export async function resolvePublicationChannel(guild, voiceChannel, preferredCh
     });
   }
 
-  return target.edit({
-    name: expectedName,
-    parent: voiceChannel.parentId,
-    lockPermissions: false,
-    topic: publicationChannelTopic(target.topic, voiceChannel.id),
-    permissionOverwrites: overwritePayload,
-    reason: `Sincronização do PontoGrava com ${voiceChannel.name}`
-  });
+  const topic = publicationChannelTopic(target.topic, voiceChannel.id);
+  const updates = { reason: `Sincronização do PontoGrava com ${voiceChannel.name}` };
+  if (target.name !== expectedName) updates.name = expectedName;
+  if (target.parentId !== voiceChannel.parentId) {
+    updates.parent = voiceChannel.parentId;
+    updates.lockPermissions = false;
+  }
+  if (target.topic !== topic) updates.topic = topic;
+  if (!hasPermissionOverwrites(target, overwritePayload)) {
+    updates.permissionOverwrites = overwritePayload;
+  }
+  return Object.keys(updates).length === 1 ? target : target.edit(updates);
+}
+
+export function publicationErrorMessage(error) {
+  const code = error?.code ?? error?.rawError?.code;
+  if (Number(code) === 50_013 || error?.message === 'Missing Permissions') {
+    return 'O bot não tem permissão para criar ou atualizar o canal. Autorize-o novamente em Ajustes → Discord.';
+  }
+  return error?.message ?? String(error);
 }
 
 export function publicationMessageContent({ title, createdAt, voiceChannelId, summary }) {

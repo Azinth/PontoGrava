@@ -7,6 +7,7 @@ import { ChannelType } from 'discord.js';
 import {
   publicationChannelName,
   publicationChannelTopic,
+  publicationErrorMessage,
   publicationMessageContent,
   publicationVoiceChannelId,
   publishMeeting,
@@ -38,6 +39,14 @@ function textChannel(overrides = {}) {
     type: ChannelType.GuildText,
     parentId: 'category',
     topic: 'PontoGrava:voice-channel=123456789012345678',
+    permissionOverwrites: {
+      cache: new Map([['everyone', {
+        id: 'everyone',
+        type: 0,
+        allow: { bitfield: 1n },
+        deny: { bitfield: 2n }
+      }]])
+    },
     async edit(options) {
       channel.lastEdit = options;
       channel.name = options.name;
@@ -72,9 +81,35 @@ test('reuses and synchronizes the channel linked to the voice room', async () =>
   assert.equal(result.id, text.id);
   assert.equal(text.lastEdit.name, 'pontograva-reuniao-renomeada');
   assert.equal(text.lastEdit.parent, 'new-category');
+  assert.equal(text.lastEdit.permissionOverwrites, undefined);
+});
+
+test('does not edit an already synchronized publication channel', async () => {
+  const voice = voiceChannel();
+  const text = textChannel({ async edit() { throw new Error('should not edit'); } });
+  const guild = { channels: { cache: new Map([[voice.id, voice], [text.id, text]]) } };
+  assert.equal(await resolvePublicationChannel(guild, voice), text);
+});
+
+test('updates publication channel permissions only when they changed', async () => {
+  const voice = voiceChannel();
+  const text = textChannel({
+    permissionOverwrites: {
+      cache: new Map([['everyone', {
+        id: 'everyone', type: 0, allow: { bitfield: 4n }, deny: { bitfield: 2n }
+      }]])
+    }
+  });
+  const guild = { channels: { cache: new Map([[voice.id, voice], [text.id, text]]) } };
+  await resolvePublicationChannel(guild, voice);
   assert.deepEqual(text.lastEdit.permissionOverwrites, [{
     id: 'everyone', type: 0, allow: 1n, deny: 2n
   }]);
+});
+
+test('explains missing Discord permissions', () => {
+  assert.match(publicationErrorMessage({ code: 50_013 }), /Autorize-o novamente/);
+  assert.equal(publicationErrorMessage(new Error('Falha')), 'Falha');
 });
 
 test('creates one marked channel when no equivalent exists', async () => {
