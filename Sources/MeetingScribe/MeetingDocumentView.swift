@@ -272,11 +272,17 @@ struct NativeDocumentTextView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(session: session) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSTextView.scrollableTextView()
+        let scroll = OverlayScrollView()
+        let textView = NSTextView()
+        scroll.documentView = textView
         scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
-        let textView = scroll.documentView as! NSTextView
+        scroll.scrollerStyle = .overlay
+        // Keep the knob off the rounded corners and the card's edge.
+        scroll.scrollerInsets = NSEdgeInsets(top: 10, left: 0, bottom: 10, right: 3)
         textView.delegate = context.coordinator
         textView.drawsBackground = false
         textView.isRichText = false
@@ -332,6 +338,15 @@ struct NativeDocumentTextView: NSViewRepresentable {
             source = textView.string
             session.update(textView.string)
         }
+    }
+}
+
+/// Thin, auto-hiding scroller even when System Settings says "Always show scroll bars"
+/// (AppKit resets `scrollerStyle` on that preference change, so pin it here).
+private final class OverlayScrollView: NSScrollView {
+    override var scrollerStyle: NSScroller.Style {
+        get { .overlay }
+        set { super.scrollerStyle = .overlay }
     }
 }
 
