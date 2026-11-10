@@ -36,6 +36,8 @@ final class AppModel: ObservableObject {
     @Published var statusDetail = "Escolha o microfone e inicie uma reunião."
     @Published var warningMessage: String?
     @Published var errorMessage: String?
+    /// Meetings ticked in the sidebar for batch deletion (separate from the opened meeting).
+    @Published var checkedMeetingIDs: Set<UUID> = []
     @Published var showOnboarding: Bool
     @Published var meetingManagementRequest: MeetingManagementRequest?
     @Published var notificationPermissionState: NotificationPermissionState = .unknown
@@ -530,8 +532,12 @@ final class AppModel: ObservableObject {
     }
 
     func presentDelete(_ record: MeetingRecord) {
-        guard phase == .idle else { return }
-        meetingManagementRequest = .delete(record)
+        presentDelete([record])
+    }
+
+    func presentDelete(_ records: [MeetingRecord]) {
+        guard phase == .idle, !records.isEmpty else { return }
+        meetingManagementRequest = .delete(records)
     }
 
     func renameMeeting(_ record: MeetingRecord, to name: String) throws {
@@ -568,18 +574,44 @@ final class AppModel: ObservableObject {
         meetingFileService.eligibleRecords(from: records, for: scope)
     }
 
-    func deleteMeeting(_ record: MeetingRecord, scope: MeetingDeletionScope) async {
+    func deleteMeetings(_ records: [MeetingRecord], scope: MeetingDeletionScope) async {
         guard phase == .idle else { return }
+        if records.count == 1, let record = records.first {
+            phase = .cleaning
+            statusDetail = "Movendo arquivos para a Lixeira…"
+            defer { phase = .idle }
+            checkedMeetingIDs.remove(record.id)
+            do {
+                try await moveMeetingContentToTrash(record, scope: scope)
+            } catch MeetingFileError.folderMissing {
+                meetingManagementRequest = .removeOrphan(record)
+            } catch {
+                meetingManagementRequest = nil
+                errorMessage = error.localizedDescription
+            }
+            return
+        }
+
+        meetingManagementRequest = nil
+        checkedMeetingIDs.subtract(records.map(\.id))
+        let targets = records.filter { hasContent(scope, in: $0) }
+        guard !targets.isEmpty else { return }
         phase = .cleaning
-        statusDetail = "Movendo arquivos para a Lixeira…"
         defer { phase = .idle }
-        do {
-            try await moveMeetingContentToTrash(record, scope: scope)
-        } catch MeetingFileError.folderMissing {
-            meetingManagementRequest = .removeOrphan(record)
-        } catch {
-            meetingManagementRequest = nil
-            errorMessage = error.localizedDescription
+        var failed = 0
+        for (index, record) in targets.enumerated() {
+            statusDetail = "Excluindo reunião \(index + 1) de \(targets.count)…"
+            do {
+                try await moveMeetingContentToTrash(record, scope: scope)
+            } catch {
+                failed += 1
+            }
+        }
+        statusDetail = failed == 0
+            ? "Exclusão concluída."
+            : "Exclusão concluída com \(failed) falha(s)."
+        if failed > 0 {
+            warningMessage = "\(failed) de \(targets.count) reuniões não puderam ser movidas para a Lixeira."
         }
     }
 

@@ -86,23 +86,23 @@ struct ContentView: View {
                 .environmentObject(model)
         }
         .confirmationDialog(
-            "Excluir conteúdo da reunião?",
+            deleteRecords.count > 1 ? "Excluir conteúdo de \(deleteRecords.count) reuniões?" : "Excluir conteúdo da reunião?",
             isPresented: deleteRequestPresented,
             titleVisibility: .visible,
-            presenting: deleteRecord
-        ) { record in
+            presenting: deleteRecords
+        ) { records in
             Button("Excluir apenas o áudio", role: .destructive) {
-                Task { await model.deleteMeeting(record, scope: .audio) }
+                Task { await model.deleteMeetings(records, scope: .audio) }
             }
-            .disabled(!model.hasContent(.audio, in: record))
+            .disabled(!records.contains { model.hasContent(.audio, in: $0) })
             Button("Excluir apenas o texto", role: .destructive) {
-                Task { await model.deleteMeeting(record, scope: .text) }
+                Task { await model.deleteMeetings(records, scope: .text) }
             }
-            .disabled(!model.hasContent(.text, in: record))
+            .disabled(!records.contains { model.hasContent(.text, in: $0) })
             Button("Excluir áudio e texto", role: .destructive) {
-                Task { await model.deleteMeeting(record, scope: .all) }
+                Task { await model.deleteMeetings(records, scope: .all) }
             }
-            .disabled(!model.hasContent(.all, in: record))
+            .disabled(!records.contains { model.hasContent(.all, in: $0) })
             Button("Cancelar", role: .cancel) { model.meetingManagementRequest = nil }
         } message: { _ in
             Text("Os itens escolhidos serão movidos para a Lixeira. Excluir o áudio também remove todas as partes ocultas usadas na recuperação.")
@@ -153,9 +153,9 @@ struct ContentView: View {
         )
     }
 
-    private var deleteRecord: MeetingRecord? {
-        guard case let .delete(record) = model.meetingManagementRequest else { return nil }
-        return record
+    private var deleteRecords: [MeetingRecord] {
+        guard case let .delete(records) = model.meetingManagementRequest else { return [] }
+        return records
     }
 
     private var orphanRequestPresented: Binding<Bool> {
@@ -192,6 +192,7 @@ struct ContentView: View {
 private struct AppSidebar: View {
     @EnvironmentObject private var model: AppModel
     @State private var searchText = ""
+    @State private var isHoveringList = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @EnvironmentObject private var documents: DocumentLibrary
 
@@ -224,45 +225,114 @@ private struct AppSidebar: View {
 
             Divider()
 
-            Text("REUNIÕES")
-                .font(.caption2.weight(.semibold))
-                .tracking(1.1)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 4)
+            VStack(alignment: .leading, spacing: 0) {
+                listHeader
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 4)
 
-            List(filteredRecords, selection: Binding(
-                get: { model.selectedRecordID },
-                set: { id in
-                    guard !documents.hasUnsavedChanges else {
-                        model.warningMessage = "Há uma edição que ainda não pôde ser salva. Tente salvar novamente antes de trocar de reunião."
-                        return
+                List(filteredRecords, selection: Binding(
+                    get: { model.selectedRecordID },
+                    set: { id in
+                        guard !documents.hasUnsavedChanges else {
+                            model.warningMessage = "Há uma edição que ainda não pôde ser salva. Tente salvar novamente antes de trocar de reunião."
+                            return
+                        }
+                        model.selectedRecordID = id
                     }
-                    model.selectedRecordID = id
-                }
-            )) { record in
-                MeetingRow(record: record)
-                    .tag(record.id)
-            }
-            .listStyle(.sidebar)
-            .searchable(text: $searchText, placement: .sidebar, prompt: "Buscar reuniões")
-            .overlay {
-                if model.records.isEmpty {
-                    ContentUnavailableView(
-                        "Sem reuniões",
-                        systemImage: "waveform",
-                        description: Text("Suas gravações aparecerão aqui.")
+                )) { record in
+                    MeetingRow(
+                        record: record,
+                        isChecked: Binding(
+                            get: { model.checkedMeetingIDs.contains(record.id) },
+                            set: { if $0 { model.checkedMeetingIDs.insert(record.id) } else { model.checkedMeetingIDs.remove(record.id) } }
+                        ),
+                        selectionActive: !model.checkedMeetingIDs.isEmpty
                     )
-                } else if filteredRecords.isEmpty {
-                    ContentUnavailableView.search(text: searchText)
+                    .tag(record.id)
                 }
+                .listStyle(.sidebar)
+                .searchable(text: $searchText, placement: .sidebar, prompt: "Buscar reuniões")
+                .overlay {
+                    if model.records.isEmpty {
+                        ContentUnavailableView(
+                            "Sem reuniões",
+                            systemImage: "waveform",
+                            description: Text("Suas gravações aparecerão aqui.")
+                        )
+                    } else if filteredRecords.isEmpty {
+                        ContentUnavailableView.search(text: searchText)
+                    }
+                }
+            }
+            .onHover { isHoveringList = $0 }
+            .onChange(of: model.records.map(\.id)) { _, ids in
+                model.checkedMeetingIDs.formIntersection(ids)
             }
 
             Divider()
             SidebarSettings()
         }
         .background(reduceTransparency ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor)) : AnyShapeStyle(.regularMaterial))
+    }
+
+    private var checkedCount: Int { model.checkedMeetingIDs.count }
+
+    private var allFilteredChecked: Binding<Bool> {
+        Binding(
+            get: { !filteredRecords.isEmpty && filteredRecords.allSatisfy { model.checkedMeetingIDs.contains($0.id) } },
+            set: { checked in
+                let ids = filteredRecords.map(\.id)
+                if checked { model.checkedMeetingIDs.formUnion(ids) } else { model.checkedMeetingIDs.subtract(ids) }
+            }
+        )
+    }
+
+    private var listHeader: some View {
+        let showsSelectAll = (isHoveringList || checkedCount > 0) && !filteredRecords.isEmpty
+        return HStack(spacing: 8) {
+            Toggle("Selecionar todas", isOn: allFilteredChecked)
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+                .help("Selecionar todas")
+                .opacity(showsSelectAll ? 1 : 0)
+                .allowsHitTesting(showsSelectAll)
+                .accessibilityHidden(!showsSelectAll)
+
+            if checkedCount > 0 {
+                Text(checkedCount == 1 ? "1 selecionada" : "\(checkedCount) selecionadas")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button {
+                    model.presentDelete(model.records.filter { model.checkedMeetingIDs.contains($0.id) })
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.red)
+                .help("Excluir selecionadas…")
+                .accessibilityLabel("Excluir \(checkedCount) reuniões selecionadas")
+                .disabled(model.isBusy)
+                Button {
+                    model.checkedMeetingIDs.removeAll()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("Cancelar seleção")
+                .accessibilityLabel("Cancelar seleção")
+            } else {
+                Text("REUNIÕES")
+                    .font(.caption2.weight(.semibold))
+                    .tracking(1.1)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(height: 20)
+        .animation(.easeOut(duration: 0.12), value: showsSelectAll)
     }
 }
 
@@ -301,9 +371,21 @@ private struct AppStatusPill: View {
 private struct MeetingRow: View {
     @EnvironmentObject private var model: AppModel
     let record: MeetingRecord
+    @Binding var isChecked: Bool
+    let selectionActive: Bool
+    @State private var isHovered = false
 
     var body: some View {
+        let showsCheckbox = isHovered || selectionActive || isChecked
         HStack(alignment: .top, spacing: 8) {
+            Toggle("Selecionar \(record.title)", isOn: $isChecked)
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+                .padding(.top, 2)
+                .opacity(showsCheckbox ? 1 : 0)
+                .allowsHitTesting(showsCheckbox)
+                .animation(.easeOut(duration: 0.12), value: showsCheckbox)
+
             VStack(alignment: .leading, spacing: 5) {
                 Text(record.title)
                     .font(.headline)
@@ -344,6 +426,7 @@ private struct MeetingRow: View {
             .accessibilityLabel("Ações de \(record.title)")
         }
         .padding(.vertical, 5)
+        .onHover { isHovered = $0 }
         .contextMenu { actions }
     }
 
