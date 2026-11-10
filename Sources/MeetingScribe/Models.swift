@@ -176,26 +176,16 @@ enum AppError: LocalizedError {
 
 enum MeetingManagementRequest: Identifiable {
     case rename(MeetingRecord)
-    case delete(MeetingRecord)
+    case delete([MeetingRecord])
     case removeOrphan(MeetingRecord)
     case replaceSummary(MeetingRecord)
 
     var id: String {
         switch self {
         case let .rename(record): "rename-\(record.id)"
-        case let .delete(record): "delete-\(record.id)"
+        case let .delete(records): "delete-" + records.map(\.id.uuidString).joined(separator: ",")
         case let .removeOrphan(record): "orphan-\(record.id)"
         case let .replaceSummary(record): "summary-\(record.id)"
-        }
-    }
-
-    var record: MeetingRecord {
-        switch self {
-        case let .rename(record),
-             let .delete(record),
-             let .removeOrphan(record),
-             let .replaceSummary(record):
-            record
         }
     }
 }
